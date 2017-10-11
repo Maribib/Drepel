@@ -1,7 +1,7 @@
 require DNode
 
 defmodule Drepel.Env do
-    defstruct [ id: 1, children: [], nodes: %{} ]
+    defstruct [ id: 1, children: [], nodes: %{}, workers: [], schedule: nil ]
 
     def new do
         Agent.start_link(fn -> %__MODULE__{} end, name: unquote(__MODULE__))

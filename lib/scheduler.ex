@@ -1,54 +1,59 @@
 require RedBlackTree.Utils
 
+defmodule Event do
+    @enforce_keys [ :id, :time, :toRun, :onRun ]
+    defstruct [ :id, :time, :toRun, :onRun ]
+end
+
 defmodule Scheduler do
     def new do
         Agent.start_link(fn -> [] end, name: :eventCollection)
     end
 
-    def comparator(e1, e2) do
+    def schedule(map, time, toRun, onRun \\ nil)
+    def schedule(%MockDNode{id: id}, time, toRun, onRun) do # online scheduling
+        send(:scheduler, %Event{id: id, time: time, toRun: toRun, onRun: onRun})
+    end
+    def schedule(%DNode{id: id}, time, toRun, onRun) do # offline scheduling
+        Agent.update(:eventCollection, &(&1 ++ [ %Event{id: id, time: time, toRun: toRun, onRun: onRun} ]))
+    end
+
+    def _comparator(e1, e2) do
         case Timex.compare(e1.time, e2.time) do
             0 -> RedBlackTree.compare_terms(e1.id, e2.id)
             res -> res
         end
     end
 
-    def schedule(map, time, toRun, onRun \\ nil)
-    def schedule(%MockDNode{id: id}, time, toRun, onRun) do # online scheduling
-        send(:scheduler, %{id: id, time: time, toRun: toRun, onRun: onRun})
-    end
-    def schedule(%DNode{id: id}, time, toRun, onRun) do # offline scheduling
-        Agent.update(:eventCollection, &(&1 ++ [%{id: id, time: time, toRun: toRun, onRun: onRun}]))
-    end
-
     def spawnAll do
         now = Timex.now
-        Agent.update(Drepel.Supervisor, &_spawnAll(now, &1))
+        Agent.update(Drepel.Env, &_spawnAll(now, &1))
     end
 
-    def _spawnAll(now, %{schedule: schedule} = execState) do
+    def _spawnAll(now, %{ schedule: schedule } = env) do
         case RedBlackTree.Utils.first(schedule) do
-            nil -> execState
-            v -> _spawnOne(execState, v, now)
-         end 
+            nil -> env
+            v -> _spawnOne(env, v, now)
+        end 
     end
 
-    def _spawnOne(%{ps: ps, schedule: schedule} = execState, event, now) do
-        if Timex.after?(now, event.time) do
+    def _spawnOne(%{ workers: workers, schedule: schedule } = env, event, now) do
+        if Timex.after?(now, event.time) do # check if time to spawn
             pid = elem(Task.start_link(fn -> event.toRun.(%MockDNode{id: event.id}) end), 1)
             schedule = RedBlackTree.delete(schedule, event)
-            if !is_nil(event.onRun) do
-                nt = event.onRun.(event)
-                _spawnAll(now, %{ schedule: RedBlackTree.insert(schedule, nt), ps: ps ++ [pid] })
+            if !is_nil(event.onRun) do # check if rescheduling rule
+                newEvent = event.onRun.(event)
+                _spawnAll(now, %{ env | schedule: RedBlackTree.insert(schedule, newEvent), workers: workers ++ [pid] })
             else
-                _spawnAll(now, %{ schedule: schedule, ps: ps ++ [pid] })
+                _spawnAll(now, %{ env | schedule: schedule, workers: workers ++ [pid] })
             end
         else
-            execState
+            env
         end
     end
 
     def sleepTime do
-        Agent.get(Drepel.Supervisor, fn %{schedule: schedule} ->
+        Agent.get(Drepel.Env, fn %{schedule: schedule} ->
             if (Set.size(schedule)>0) do
                 max(div(Timex.diff(RedBlackTree.Utils.first(schedule).time, Timex.now), 1000), 0)
             else
@@ -65,11 +70,12 @@ defmodule Scheduler do
         now = Timex.now
         events = Enum.map(Agent.get(:eventCollection, &(&1)), &shiftMilisec(now, &1))
         Agent.stop(:eventCollection)
-        RedBlackTree.new(events, comparator: &Scheduler.comparator/2)
+        RedBlackTree.new(events, comparator: &Scheduler._comparator/2)
     end
 
     def run do
         Process.flag(:trap_exit, true)
+        Agent.update(Drepel.Env, fn env -> %{ env | schedule: Scheduler.initSchedule() } end)
         _run()
     end
 
