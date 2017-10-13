@@ -10,6 +10,7 @@ defmodule Drepel.Supervisor do
             Supervisor.Spec.supervisor(DNode.Supervisor, [[name: DNode.Supervisor]]),
             Supervisor.Spec.supervisor(Source.Supervisor, [[name: Source.Supervisor]]),
             Supervisor.Spec.worker(Manager, [[], [name: Manager]]),
+            Supervisor.Spec.worker(Schedule, [[], [name: Schedule]]),
             Supervisor.Spec.worker(Scheduler, [[], [name: Scheduler]])
         ]
         Supervisor.init(children, strategy: :one_for_one)

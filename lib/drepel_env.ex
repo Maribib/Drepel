@@ -2,7 +2,7 @@ require DNode
 require MockDNode
 
 defmodule Drepel.Env do
-    defstruct [ id: 1, children: [], nodes: %{}, workers: [], schedule: nil ]
+    defstruct [ id: 1, children: [], nodes: %{} ]
 
     def new do
         Agent.start_link(fn -> %__MODULE__{} end, name: unquote(__MODULE__))
@@ -14,6 +14,10 @@ defmodule Drepel.Env do
 
     def get(key) do
         Agent.get(__MODULE__, &(Map.get(&1, key)))
+    end
+
+    def getNode(key) do
+        Agent.get(__MODULE__, &Map.get(&1.nodes, key))
     end
 
     def _addChild(parent, env) do
