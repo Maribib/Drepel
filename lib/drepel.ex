@@ -1,7 +1,8 @@
 require Drepel.Env, as: Env
-require DNode
-require MockDNode
 require Drepel.Supervisor
+require MockDNode
+require DNode.Supervisor
+require EventCollector
 
 defmodule Drepel do
     use Agent
@@ -11,7 +12,7 @@ defmodule Drepel do
         quote do
             import unquote(__MODULE__)
             Env.new()
-            Scheduler.new()
+            EventCollector.start_link()
         end
     end
 
@@ -19,47 +20,52 @@ defmodule Drepel do
         nil
     end
 
+    def startAllMidNodes do
+        env = Drepel.Env.get()
+        toRun = Map.keys(env.nodes) -- env.children
+        Enum.map(toRun, &DNode.Supervisor.start(Map.get(env.nodes, &1)))
+    end
+
+    def startAllSources do
+        env = Drepel.Env.get()
+        Enum.map(env.children, fn id ->
+            aDNode = Map.get(env.nodes, id)
+            Source.Supervisor.start(fn -> aDNode.runFct.(aDNode) end)
+        end)
+    end
+
     def run(duration \\ :inf) do
-        Drepel.Supervisor.new()
-        Drepel.Supervisor.join(duration)
-    end
-
-    def onNext(%MockDNode{id: id}, value) do
-        env = Drepel.Env.get()
-        node = Map.get(env.nodes, id)
-        Enum.map(node.children, &_runNode(env, &1, node.id, :onNext, value))
-    end
-
-    def onCompleted(%MockDNode{id: id}) do
-        env = Drepel.Env.get()
-        node = Map.get(env.nodes, id)
-        Enum.map(node.children, &_runNode(env, &1, node.id, :onCompleted))
-    end
-
-    def onError(%MockDNode{id: id}, err) do
-        env = Drepel.Env.get()
-        node = Map.get(env.nodes, id)
-        Enum.map(node.children, &_runNode(env, &1, node.id, :onError, err))
-    end
-
-    def _runNode(env, id, sender, label, arg \\ nil) do
-        node = Map.get(env.nodes, id)
-        case { label, node.runFct} do
-            # sink nodes (subscribe)
-            {:onNext, %{onNextSink: nextFct}} -> nextFct.(arg)
-            {:onError, %{onErrorSink: errFct}} -> errFct.(arg)
-            {:onCompleted, %{onCompletedSink: complFct}} -> complFct.()
-            # mid nodes
-            {:onNext, %{onNext: nextFct}} -> nextFct.(%MockDNode{id: id}, sender, arg)
-            {:onError, %{onError: errFct}} -> errFct.(%MockDNode{id: id}, sender, arg)
-            {:onCompleted, %{onCompleted: complFct}} -> complFct.(%MockDNode{id: id}, sender)
-            {:onError, _} -> Enum.map(node.children, &_runNode(env, &1, id, :onError, arg)) # propagate
-            {:onCompleted, _} -> Enum.map(node.children, &_runNode(env, &1, id, :onCompleted)) # propagate
+        {:ok, pid} = Drepel.Supervisor.start_link() 
+        startAllMidNodes()
+        startAllSources()
+        Process.monitor(pid)
+        case duration do
+            :inf -> receive do
+                _msg -> :done
+            end
+            _ -> receive do
+                _msg -> :done
+            after
+                duration -> Supervisor.stop(Drepel.Supervisor)
+            end
         end
+            
+    end
+
+    def onNext(%DNode{id: id, children: children}, value) do 
+        Enum.map(children, &DNode.onNext(&1, id, value))
+    end
+
+    def onCompleted(%DNode{id: id, children: children}) do
+        Enum.map(children, &DNode.onCompleted(&1, id))
+    end
+
+    def onError(%DNode{id: id, children: children}, err) do
+        Enum.map(children, &DNode.onError(&1, id, err))
     end
 
     def create(fct) do
-        Drepel.Env.createNode([0], fct)
+        Drepel.Env.createNode([:dnode_0], fct)
     end
 
     def empty do
@@ -121,7 +127,7 @@ defmodule Drepel do
 
     def timer(offset, val \\ 0) do
         res = create(&doNothing/1)
-        Scheduler.schedule(res, offset, fn obs ->
+        EventCollector.schedule(res, offset, fn obs ->
             onNext(obs, val)
             onCompleted(obs)
         end)
@@ -130,7 +136,7 @@ defmodule Drepel do
 
     def interval(duration) do
         res = create(&doNothing/1)
-        Scheduler.schedule(res, duration, 
+        EventCollector.schedule(res, duration, 
             fn obs -> onNext(obs, Agent.get_and_update({:global, obs.id}, fn s -> {s, s+1} end)) end, 
             fn event -> 
                 %{ event | time: Timex.shift(event.time, microseconds: duration*1000) } 
@@ -142,13 +148,13 @@ defmodule Drepel do
 
     # MID NODES
 
-    def map(%DNode{id: id}, fct) do
+    def map(%MockDNode{id: id}, fct) do
         Drepel.Env.createMidNode([id], fn obs, _, val ->
             onNext(obs, fct.(val))
         end)
     end
 
-    def flatmap(%DNode{id: id}, fct) do
+    def flatmap(%MockDNode{id: id}, fct) do
         Drepel.Env.createMidNode([id], fn obs, _, val ->
             res = fct.(val)
             case Enumerable.impl_for res  do
@@ -158,7 +164,7 @@ defmodule Drepel do
         end)
     end
 
-    def scan(%DNode{id: id}, fct, init \\ 0) do
+    def scan(%MockDNode{id: id}, fct, init \\ 0) do
         res = Drepel.Env.createMidNode([id], fn obs, _, val ->
             Agent.update({:global, obs.id}, &fct.(&1, val))
             onNext(obs, Agent.get({:global, obs.id}, &(&1)))
@@ -181,7 +187,7 @@ defmodule Drepel do
     @doc """
     Implement bufferClosingSelector
     """
-    def buffer(%DNode{id: id}, %DNode{id: boundId}) do
+    def buffer(%MockDNode{id: id}, %MockDNode{id: boundId}) do
         _buffer(id, boundId, [], %{ 
             onNextVal: &Agent.update({:global, &1.id}, fn buff -> buff ++ [&2] end),
             onNextBound: fn obs, _ -> onNext(obs, Agent.get_and_update({:global, obs.id}, fn buff -> {buff, []} end))end
@@ -198,7 +204,7 @@ defmodule Drepel do
             end)
     end
 
-    def bufferBoundaries(%DNode{id: id}, %DNode{id: boundId}) do
+    def bufferBoundaries(%MockDNode{id: id}, %MockDNode{id: boundId}) do
         _buffer(id, boundId, nil, %{ 
             onNextVal: _ignoreWhenNil(),
             onNextBound: fn obs, _ -> 
@@ -219,7 +225,7 @@ defmodule Drepel do
         end
     end
 
-    def bufferSwitch(%DNode{id: id}, %DNode{id: boundId}) do
+    def bufferSwitch(%MockDNode{id: id}, %MockDNode{id: boundId}) do
         _buffer(id, boundId, nil, %{
             onNextVal: _ignoreWhenNil(),
             onNextBound: fn obs, _ ->
@@ -240,7 +246,7 @@ defmodule Drepel do
         end
     end
 
-    def bufferWithCount(%DNode{id: id}, count) do 
+    def bufferWithCount(%MockDNode{id: id}, count) do 
         res = Drepel.Env.createMidNode([id], fn obs, _, val ->
             case Agent.get_and_update({:global, obs.id}, &_updateBufferWithCountState(&1, count, val)) do
                 nil -> nil
@@ -255,7 +261,7 @@ defmodule Drepel do
         
     end
 
-    def reduce(%DNode{id: id}, fct, init \\ 0) do
+    def reduce(%MockDNode{id: id}, fct, init \\ 0) do
         res = Drepel.Env.createMidNode([id], %{
             onNext: fn obs, _, val ->
                 Agent.update({:global, obs.id}, &fct.(&1, val))
@@ -271,7 +277,7 @@ defmodule Drepel do
 
     # SINK NODES
 
-    def subscribe(%DNode{id: id}, nextFct, errFct \\ &Drepel.doNothing/1, complFct \\ &Drepel.doNothing/0) do
+    def subscribe(%MockDNode{id: id}, nextFct, errFct \\ &Drepel.doNothing/1, complFct \\ &Drepel.doNothing/0) do
         Drepel.Env.createSink([id], %{ onNextSink: nextFct, onErrorSink: errFct, onCompletedSink: complFct })
     end
 

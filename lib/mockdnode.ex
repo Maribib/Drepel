@@ -1,4 +1,4 @@
 defmodule MockDNode do
-    @enforce_keys [ :id ]
-    defstruct [ :id ]
+    @enforce_keys [:id]
+    defstruct [:id]
 end

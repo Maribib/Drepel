@@ -1,4 +1,5 @@
 require DNode
+require MockDNode
 
 defmodule Drepel.Env do
     defstruct [ id: 1, children: [], nodes: %{}, workers: [], schedule: nil ]
@@ -16,31 +17,35 @@ defmodule Drepel.Env do
     end
 
     def _addChild(parent, env) do
-        if parent != 0 do
+        id = String.to_atom("dnode_#{env.id}")
+        if parent != :dnode_0 do
             node = Map.get(env.nodes, parent)
-            %{ env | nodes: %{ env.nodes | parent => %{ node | children: node.children ++ [env.id] } } }
+            %{ env | nodes: %{ env.nodes | parent => %{ node | children: node.children ++ [id] } } }
         else
-            %{ env | children: env.children ++ [env.id] }
+            %{ env | children: env.children ++ [id] }
          end
     end
 
     def _addNode(env, parents, runFct) do
-        bn = %DNode{ id: env.id, parents: parents, runFct: runFct }
+        id = String.to_atom("dnode_#{env.id}")
+        newDNode = %DNode{ id: id, parents: parents, runFct: runFct }
         env = Enum.reduce(parents, env, &_addChild/2 )
-        %{ env |  
-            id: env.id+1, 
-            nodes: Map.put(env.nodes, env.id, bn) 
+        { 
+            %MockDNode{id: id}, 
+            %{ env |  
+                id: env.id+1, 
+                nodes: Map.put(env.nodes, id, newDNode) 
+            }
         }
     end
 
     def createNode(parents, fct) do
-        id = __MODULE__.get(:id)
-        Agent.update(__MODULE__, &_addNode(&1, parents, fct))
-        %DNode{id: id}
+        Agent.get_and_update(__MODULE__, &_addNode(&1, parents, fct))
     end
 
     def createSink(parents, fct) do
-        Agent.update(__MODULE__, &_addNode(&1, parents, fct))
+        Agent.get_and_update(__MODULE__, &_addNode(&1, parents, fct))
+        :ok
     end
 
     @errWrapper %{

@@ -1,21 +1,14 @@
 require RedBlackTree.Utils
 
-defmodule Event do
-    @enforce_keys [ :id, :time, :toRun, :onRun ]
-    defstruct [ :id, :time, :toRun, :onRun ]
-end
-
 defmodule Scheduler do
-    def new do
-        Agent.start_link(fn -> [] end, name: :eventCollection)
+    use Task
+
+    def start_link(args, _opts \\ nil) do
+        Task.start_link(&Scheduler.run/0)
     end
 
-    def schedule(map, time, toRun, onRun \\ nil)
-    def schedule(%MockDNode{id: id}, time, toRun, onRun) do # online scheduling
-        send(:scheduler, %Event{id: id, time: time, toRun: toRun, onRun: onRun})
-    end
-    def schedule(%DNode{id: id}, time, toRun, onRun) do # offline scheduling
-        Agent.update(:eventCollection, &(&1 ++ [ %Event{id: id, time: time, toRun: toRun, onRun: onRun} ]))
+    def schedule(%DNode{id: id}, time, toRun, onRun) do # online scheduling
+        send(:schedule, %Event{id: id, time: time, toRun: toRun, onRun: onRun})
     end
 
     def _comparator(e1, e2) do
@@ -39,13 +32,13 @@ defmodule Scheduler do
 
     def _spawnOne(%{ workers: workers, schedule: schedule } = env, event, now) do
         if Timex.after?(now, event.time) do # check if time to spawn
-            pid = elem(Task.start_link(fn -> event.toRun.(%MockDNode{id: event.id}) end), 1)
+            Source.Supervisor.start(fn -> event.toRun.(Map.get(env.nodes, event.id)) end)
             schedule = RedBlackTree.delete(schedule, event)
             if !is_nil(event.onRun) do # check if rescheduling rule
                 newEvent = event.onRun.(event)
-                _spawnAll(now, %{ env | schedule: RedBlackTree.insert(schedule, newEvent), workers: workers ++ [pid] })
+                _spawnAll(now, %{ env | schedule: RedBlackTree.insert(schedule, newEvent) })
             else
-                _spawnAll(now, %{ env | schedule: schedule, workers: workers ++ [pid] })
+                _spawnAll(now, %{ env | schedule: schedule })
             end
         else
             env
@@ -68,13 +61,12 @@ defmodule Scheduler do
 
     def initSchedule do
         now = Timex.now
-        events = Enum.map(Agent.get(:eventCollection, &(&1)), &shiftMilisec(now, &1))
-        Agent.stop(:eventCollection)
+        events = Enum.map(EventCollector.getEvents(), &shiftMilisec(now, &1))
+        GenServer.stop(EventCollector)
         RedBlackTree.new(events, comparator: &Scheduler._comparator/2)
     end
 
     def run do
-        Process.flag(:trap_exit, true)
         Agent.update(Drepel.Env, fn env -> %{ env | schedule: Scheduler.initSchedule() } end)
         _run()
     end
@@ -84,7 +76,7 @@ defmodule Scheduler do
         case sleepTime() do
             0 -> Scheduler._run
             t -> receive do
-                {:EXIT, pid, :normal} -> nil
+                {:schedule, %Event{}=ev} -> nil
             after 
                 t -> Scheduler._run
             end
