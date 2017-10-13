@@ -1,6 +1,6 @@
 # DREPEL
 
-**TODO: Add description**
+Stands for Distributed REactive Programming with ELixir.
 
 ## Installation
 
