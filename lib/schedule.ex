@@ -30,7 +30,7 @@ defmodule Schedule do
 
     # Server API
 
-    def handle_call({:getSleepTime}, from, schedule) do
+    def handle_call({:getSleepTime}, _from, schedule) do
         if (Set.size(schedule)>0) do
             { :reply, max(div(Timex.diff(RedBlackTree.Utils.first(schedule).time, Timex.now), 1000), 0), schedule }
         else
@@ -38,7 +38,7 @@ defmodule Schedule do
         end
     end
 
-    def handle_call({:spawnAll}, from, schedule) do
+    def handle_call({:spawnAll}, _from, schedule) do
         now = Timex.now
         { :reply, :ok, _spawnAll(now, schedule) }
     end

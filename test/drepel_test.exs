@@ -104,6 +104,7 @@ defmodule DrepelTest do
         Drepel.run()
         assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:next, 4}, {:compl, nil}]
     end
+    
 
     test "timer" do
         timer(200, 42)
@@ -126,31 +127,7 @@ defmodule DrepelTest do
         Drepel.run(200)
         assert collected()==[{:next, 0}, {:next, 10}, {:next, 20}, {:next, 30}]
     end
-
-    test "range zero div error" do
-        range(3..0) 
-        |> map(&(6/&1))
-        |> collector
-        Drepel.run()
-        assert collected()==[{:next, 2}, {:next, 3}, {:next, 6}, {:err, {:error, :badarith}}, {:compl, nil}]
-    end
-
-    test "flatmap" do
-        range(1..3)
-        |> flatmap(&Enum.to_list(1..&1))
-        |> collector
-        Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 1}, {:next, 2}, {:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
-    end
-
-    test "scan" do
-        range(0..3) 
-        |> scan(&(&1+&2))
-        |> collector
-        Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 1}, {:next, 3}, {:next, 6}, {:compl, nil}]
-    end
-
+    
     test "buffer" do
         interval(25)
         |> buffer(interval(100))
@@ -158,6 +135,7 @@ defmodule DrepelTest do
         Drepel.run(200)
         assert collected()==[{:next, [0, 1, 2, 3]}, {:next, [4, 5, 6, 7]}]
     end
+
 
     test "bufferBoundaries" do
         interval(25)
@@ -167,20 +145,23 @@ defmodule DrepelTest do
         assert collected()==[{:next, [3, 4, 5, 6]}, {:next, [7, 8, 9, 10]}]
     end
 
-    test "bufferSwitch" do
-        interval(25)
-        |> bufferSwitch(interval(100))
-        |> collector
-        Drepel.run(300)
-        assert collected()==[{:next, [3, 4, 5, 6]}]
-    end
-
-    test "bufferWithCount" do
-        interval(25)
-        |> bufferWithCount(2)
-        |> collector
-        Drepel.run(200)
-        assert collected()==[{:next, [0, 1]}, {:next, [2, 3]}, {:next, [4, 5]}, {:next, [6, 7]}]
+    test "groupBy" do
+        IO.puts "groupby"
+        from([{"a", 2}, {"b", 1}, {"c", 3}, {"a", 4}, {"b", 0}, {"c", 3} ])
+        |> groupBy(fn {k, _} -> k end, fn {_, v} -> v end)
+        |> subscribe(fn group, key -> 
+            group |> max() |> map(fn val -> {key, val} end) |> collector
+        end)
+        Drepel.run()
+        res = collected()
+        values = Enum.filter(res, fn {tag, _val} -> tag == :next end)
+        m = Enum.reduce(values, %{}, fn {:next, {key, val}}, acc -> Map.put(acc, key, val) end)
+        assert Map.get(m, "a")==4
+        assert Map.get(m, "b")==1
+        assert Map.get(m, "c")==3
+        compls = Enum.filter(res, fn {tag, _val} -> tag == :compl end)
+        assert length(compls)==3
     end
 
 end
+ 
