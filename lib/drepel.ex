@@ -260,17 +260,18 @@ defmodule Drepel do
             onCompleted: fn obs, _ ->
                 onNext(obs, obs.state)
                 onCompleted(obs)
+                obs
             end
         }, fn -> init end)
     end
 
-    def max(%MockDNode{id: id}) do
+    def _extremum(id, comparator) do
         Drepel.Env.createMidNode([id], %{
             onNext: fn obs, _, val ->
                 case obs.state do
                     %Sentinel{} -> %{ obs | state: val }
                     _ -> 
-                        if val>obs.state do
+                        if comparator.(val, obs.state) do
                             %{ obs | state: val }
                         else
                             obs
@@ -280,8 +281,126 @@ defmodule Drepel do
             onCompleted: fn obs, _ ->
                 onNext(obs, obs.state)
                 onCompleted(obs)
+                obs
             end
-        }, fn -> %Sentinel{} end)    
+        }, fn -> %Sentinel{} end)  
+    end
+
+    def max(%MockDNode{id: id}) do
+        _extremum(id, fn v1, v2 -> v1>v2 end)
+    end
+
+    def min(%MockDNode{id: id}) do
+        _extremum(id, fn v1, v2 -> v1<v2 end)
+    end
+
+    def _extremumBy(id, extractor, comparator) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                key = extractor.(val)
+                case obs.state do
+                    %Sentinel{} -> %{ obs | state: %{ key: key, values: [val] } }
+                    %{ key: currKey } -> 
+                        if comparator.(key, currKey) do
+                            if key == currKey do
+                                %{ obs | state: %{ obs.state | values: obs.state.values ++ [val] } }
+                            else
+                                %{ obs | state: %{ key: key, values: [val] } }
+                            end
+                        else
+                            obs
+                        end
+                end
+            end,
+            onCompleted: fn obs, _ ->
+                onNext(obs, obs.state.values)
+                onCompleted(obs)
+                obs
+            end
+        }, fn -> %Sentinel{} end) 
+    end
+
+    def maxBy(%MockDNode{id: id}, extractor) do
+        _extremumBy(id, extractor, fn v1, v2 -> v1>=v2 end)
+    end
+
+    def minBy(%MockDNode{id: id}, extractor) do
+        _extremumBy(id, extractor, fn v1, v2 -> v1<=v2 end)
+    end
+
+    def average(%MockDNode{id: id}) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                %{ obs | state: %{ obs.state | count: obs.state.count+1, sum: obs.state.sum+val } }
+            end,
+            onCompleted: fn obs, _ ->
+                if obs.state.count==0 do
+                    onNext(obs, 0)
+                else
+                    onNext(obs, div(obs.state.sum, obs.state.count))
+                end
+                onCompleted(obs)
+                obs
+            end
+        }, fn -> %{ count: 0, sum: 0 } end)
+    end
+
+    def count(%MockDNode{id: id}, condition) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                if condition.(val) do
+                    %{ obs | state: obs.state+1 }
+                else
+                    obs
+                end
+            end,
+            onCompleted: fn obs, _ ->
+                onNext(obs, obs.state)
+                onCompleted(obs)
+                obs
+            end
+        }, fn -> 0 end)
+    end
+
+    def sum(%MockDNode{id: id}) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                %{ obs | state: obs.state+val }
+            end,
+            onCompleted: fn obs, _ ->
+                onNext(obs, obs.state)
+                onCompleted(obs)
+                obs
+            end
+        }, fn -> 0 end)
+    end
+
+    def concat(%MockDNode{id: id1}, %MockDNode{id: id2}) do
+        Drepel.Env.createMidNode([id1, id2], %{
+            onNext: fn obs, sender, val ->
+                if obs.state.done do
+                    onNext(obs, val)
+                    obs
+                else
+                    case sender do
+                        ^id1 -> 
+                            onNext(obs, val)
+                            obs
+                        ^id2 -> %{ obs | state: %{ obs.state | buff: obs.state.buff ++ [val] } }
+                    end
+                end
+            end,
+            onCompleted: fn obs, sender ->
+                case sender do
+                    ^id1 -> 
+                        Enum.map(obs.state.buff, &onNext(obs, &1))
+                        %{ obs | state: %{ obs.state | done: true } }
+                    ^id2 ->
+                        onCompleted(obs)
+                        obs
+                end
+            end
+        }, fn -> %{ buff: [], done: false } end)
     end
 
     def groupBy(%MockDNode{id: id}, extractKey, extractVal \\ nil) do

@@ -145,8 +145,72 @@ defmodule DrepelTest do
         assert collected()==[{:next, [3, 4, 5, 6]}, {:next, [7, 8, 9, 10]}]
     end
 
+    test "max" do
+        from([1, 2, 3])
+        |> max()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 3}, {:compl, nil}]
+    end
+
+    test "min" do
+        from([1, 2, 3])
+        |> min()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:compl, nil}]
+    end
+
+    test "maxBy" do
+        from([{"a", 1}, {"b", 2}, {"c", 3}, {"a", 3}])
+        |> maxBy(fn {_, v} -> v end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, [{"c", 3}, {"a", 3}]}, {:compl, nil}]
+    end
+
+    test "minBy" do
+        from([{"a", 1}, {"b", 2}, {"c", 3}, {"a", 3}, {"c", 1}])
+        |> minBy(fn {_, v} -> v end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, [{"a", 1}, {"c", 1}]}, {:compl, nil}]
+    end
+
+    test "average" do
+        range(1,3)
+        |> average()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 2.0}, {:compl, nil}]
+    end
+
+    test "count" do
+        from([2, 30, 22, 5, 60, 1])
+        |> count(fn el -> el>10 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 3}, {:compl, nil}]
+    end
+
+    test "sum" do
+        from([1, 2, 3, 4, 5])
+        |> sum()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 15}, {:compl, nil}]
+    end
+
+     test "concat" do
+        o1 = from([1, 1, 1])
+        o2 = from([2, 2])
+        concat(o1, o2)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 1}, {:next, 1}, {:next, 2}, {:next, 2}, {:compl, nil}]
+    end
+
     test "groupBy" do
-        IO.puts "groupby"
         from([{"a", 2}, {"b", 1}, {"c", 3}, {"a", 4}, {"b", 0}, {"c", 3} ])
         |> groupBy(fn {k, _} -> k end, fn {_, v} -> v end)
         |> subscribe(fn group, key -> 

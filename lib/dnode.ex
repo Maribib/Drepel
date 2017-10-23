@@ -51,10 +51,14 @@ defmodule DNode do
 
     def handle_cast({:onCompleted, sender}, aDNode) do
         #IO.puts "onCompleted"
-        case aDNode.runFct do
-            %{onCompletedSink: complFct} -> complFct.()
+        aDNode = case aDNode.runFct do
+            %{onCompletedSink: complFct} -> 
+                complFct.()
+                aDNode
             %{onCompleted: complFct} -> complFct.(aDNode, sender)
-            _ -> Enum.map(aDNode.children, &DNode.onCompleted(&1, aDNode.id)) # propagate
+            _ -> 
+                Enum.map(aDNode.children, &DNode.onCompleted(&1, aDNode.id)) # propagate
+                aDNode
         end
         aDNode = %{ aDNode | endedParents: aDNode.endedParents ++ [sender] }
         stopIfNeeded(aDNode)
