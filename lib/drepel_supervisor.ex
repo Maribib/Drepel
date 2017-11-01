@@ -8,7 +8,6 @@ defmodule Drepel.Supervisor do
     def init(:ok) do
         children = [
             Supervisor.Spec.supervisor(DNode.Supervisor, [[name: DNode.Supervisor]]),
-            Supervisor.Spec.supervisor(Source.Supervisor, [[name: Source.Supervisor]]),
             Supervisor.Spec.worker(Manager, [[], [name: Manager]]),
             Supervisor.Spec.worker(Schedule, [[], [name: Schedule]]),
             Supervisor.Spec.worker(Scheduler, [[], [name: Scheduler]])
