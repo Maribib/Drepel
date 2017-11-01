@@ -1,7 +1,8 @@
 
 defmodule DNode do
     @enforce_keys [:id]
-    defstruct [ :id, parents: [], children: [], runFct: &Drepel.doNothing/1, endedParents: [], initState: &Drepel.Env.nilState/0, state: nil ]
+    defstruct [ :id, parents: [], children: [], runFct: &Drepel.doNothing/1, 
+    initState: &Drepel.Env.nilState/0, state: nil, isSink: false ]
 
     use GenServer, restart: :transient
 
@@ -23,6 +24,14 @@ defmodule DNode do
         GenServer.cast(id, {:onError, sender, err})
     end
 
+    def onScheduled(id, name) do
+        GenServer.cast(id, {:onScheduled, name})
+    end
+    
+    def runSource(id) do
+        GenServer.cast(id, {:runSource})
+    end
+
     def updateChildren(id, children) do
         GenServer.call(id, {:updateChildren, children})
     end
@@ -31,12 +40,6 @@ defmodule DNode do
 
     def init(%DNode{}=aDNode) do
         { :ok, %{ aDNode | state: aDNode.initState.() } }
-    end
-
-    def stopIfNeeded(aDNode) do
-        if length(aDNode.parents -- aDNode.endedParents)==0 do
-            Manager.normalExit(self())
-        end
     end
 
     def handle_cast({:onNext, sender, value}, aDNode) do
@@ -57,11 +60,12 @@ defmodule DNode do
                 aDNode
             %{onCompleted: complFct} -> complFct.(aDNode, sender)
             _ -> 
-                Enum.map(aDNode.children, &DNode.onCompleted(&1, aDNode.id)) # propagate
+                Drepel.onCompleted(aDNode) # propagate
                 aDNode
         end
-        aDNode = %{ aDNode | endedParents: aDNode.endedParents ++ [sender] }
-        stopIfNeeded(aDNode)
+        if aDNode.isSink do
+            Manager.normalExit(self())
+        end
         {:noreply, aDNode}
     end
 
@@ -70,10 +74,28 @@ defmodule DNode do
         case aDNode.runFct do
             %{onErrorSink: errFct} -> errFct.(err)
             %{onError: errFct} -> errFct.(aDNode, sender, err)
-            _ -> Enum.map(aDNode.children, &DNode.onError(&1, aDNode.id, err)) # propagate
+            _ -> 
+                Drepel.onError(aDNode, err) # propagate
         end
-        aDNode = %{ aDNode | endedParents: aDNode.endedParents ++ [sender] }
-        stopIfNeeded(aDNode)
+        if aDNode.isSink do
+            Manager.normalExit(self())
+        end
+        {:noreply, aDNode}
+    end
+
+    def handle_cast({:onScheduled, name}, aDNode) do
+        aDNode = case aDNode.runFct do
+            %{onScheduled: schedFct} -> schedFct.(aDNode, name)
+            _ -> aDNode
+        end
+        {:noreply, aDNode}
+    end
+
+    def handle_cast({:runSource}, aDNode) do
+        aDNode = case aDNode.runFct do
+            %{onNext: nextFct} -> nextFct.(aDNode)
+            _ -> aDNode.runFct.(aDNode)
+        end
         {:noreply, aDNode}
     end
 

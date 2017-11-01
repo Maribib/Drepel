@@ -1,4 +1,4 @@
 defmodule Event do
-    @enforce_keys [ :id, :time, :toRun, :onRun ]
-    defstruct [ :id, :time, :toRun, :onRun ]
+    @enforce_keys [ :id, :time, :name, :onRun, :eid ]
+    defstruct [ :id, :time, :name, :onRun, :eid ]
 end

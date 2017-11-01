@@ -7,8 +7,8 @@ defmodule EventCollector do
         GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def schedule(%MockDNode{id: id}, time, toRun, onRun \\ nil) do
-        GenServer.cast(__MODULE__, {:schedule, %Event{id: id, time: time, toRun: toRun, onRun: onRun}})
+    def schedule(%MockDNode{id: id}, time, name \\ nil, onRun \\ nil, eid \\ nil) do
+        GenServer.cast(__MODULE__, {:schedule, %Event{id: id, time: time, name: name, onRun: onRun, eid: eid}})
     end
 
     def getEvents() do

@@ -104,7 +104,6 @@ defmodule DrepelTest do
         Drepel.run()
         assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:next, 4}, {:compl, nil}]
     end
-    
 
     test "timer" do
         timer(200, 42)
@@ -120,12 +119,30 @@ defmodule DrepelTest do
         assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}]
     end
 
-    test "interval |> map" do
+    test "map" do
         interval(50) 
         |> map(fn el -> el*10 end)
         |> collector
         Drepel.run(200)
         assert collected()==[{:next, 0}, {:next, 10}, {:next, 20}, {:next, 30}]
+    end
+
+    test "flatmap" do
+        range(1, 2)
+        |> flatmap(fn el ->
+            range(el, 2)
+        end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 2}, {:next, 2}, {:compl, nil}]
+    end
+
+    test "scan" do
+        range(1..4)
+        |> scan(fn val, acc -> val+acc end, 0)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 3}, {:next, 6}, {:next, 10}, {:compl, nil}]
     end
     
     test "buffer" do
@@ -136,13 +153,82 @@ defmodule DrepelTest do
         assert collected()==[{:next, [0, 1, 2, 3]}, {:next, [4, 5, 6, 7]}]
     end
 
-
     test "bufferBoundaries" do
         interval(25)
         |> bufferBoundaries(interval(100))
         |> collector
         Drepel.run(300)
         assert collected()==[{:next, [3, 4, 5, 6]}, {:next, [7, 8, 9, 10]}]
+    end
+
+    # TODO bufferSwitch
+
+    # TODO bufferWithCount
+
+    test "delay" do
+        from(10)
+        |> delay(200)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 10}, {:compl, nil}]
+    end
+
+    test "reduce" do
+        from([1, 2, 3, 4, 5])
+        |> reduce(fn v, acc -> v+acc end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 15}, {:compl, nil}]
+    end
+
+    test "filter" do
+        from([2, 30, 22, 5, 60, 1])
+        |> filter(fn el -> el>10 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 30}, {:next, 22}, {:next, 60}, {:compl, nil}]
+    end
+
+    test "first_1" do
+        from([2, 30, 22, 5, 60, 1])
+        |> first()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 2}, {:compl, nil}]
+    end
+
+    test "first_2" do
+        from([2, 30, 22, 5, 60, 1])
+        |> first(fn el -> el>10 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 30}, {:compl, nil}]
+    end
+
+    test "first_3" do
+        from([2, 30, 22, 5, 60, 1])
+        |> first(fn el -> el>100 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:err, "Any element match condition."}]
+    end
+
+    test "debounce" do
+        from([
+            %{value: 0, time: 100},
+            %{value: 1, time: 600},
+            %{value: 2, time: 400},
+            %{value: 3, time: 700},
+            %{value: 4, time: 200}
+        ])
+        |> flatmap(fn item ->
+            from(item.value)
+            |> delay(item.time)
+        end)
+        |> debounce(500)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 0}, {:next, 2}, {:next, 4}, {:compl, nil}]
     end
 
     test "max" do
@@ -213,7 +299,7 @@ defmodule DrepelTest do
     test "groupBy" do
         from([{"a", 2}, {"b", 1}, {"c", 3}, {"a", 4}, {"b", 0}, {"c", 3} ])
         |> groupBy(fn {k, _} -> k end, fn {_, v} -> v end)
-        |> subscribe(fn group, key -> 
+        |> subscribe(fn group, key ->
             group |> max() |> map(fn val -> {key, val} end) |> collector
         end)
         Drepel.run()

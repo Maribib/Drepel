@@ -5,7 +5,10 @@ defmodule Schedule do
 
     def _comparator(e1, e2) do
         case Timex.compare(e1.time, e2.time) do
-            0 -> RedBlackTree.compare_terms(e1.id, e2.id)
+            0 -> case RedBlackTree.compare_terms(e1.id, e2.id) do
+                0 -> RedBlackTree.compare_terms(e1.eid, e2.eid)
+                res -> res
+            end
             res -> res
         end
     end
@@ -28,6 +31,10 @@ defmodule Schedule do
         GenServer.call(__MODULE__, {:spawnAll})
     end
 
+    def addNewEvent(event) do
+        GenServer.cast(__MODULE__, {:addNewEvent, event})
+    end
+
     # Server API
 
     def handle_call({:getSleepTime}, _from, schedule) do
@@ -43,6 +50,10 @@ defmodule Schedule do
         { :reply, :ok, _spawnAll(now, schedule) }
     end
 
+    def handle_cast({:addNewEvent, event}, schedule) do
+        { :noreply, RedBlackTree.insert(schedule, event) }
+    end
+
     def _spawnAll(now, schedule) do
         case RedBlackTree.Utils.first(schedule) do
             nil -> schedule
@@ -52,7 +63,7 @@ defmodule Schedule do
 
     def _spawnOne(schedule, event, now) do
         if Timex.after?(now, event.time) do # check if time to spawn
-            Source.Supervisor.start(fn -> event.toRun.(Drepel.Env.getNode(event.id)) end)
+            DNode.onScheduled(event.id, event.name)
             schedule = RedBlackTree.delete(schedule, event)
             if !is_nil(event.onRun) do # check if rescheduling rule
                 newEvent = event.onRun.(event)
@@ -65,10 +76,8 @@ defmodule Schedule do
         end
     end
 
-
     def init(:ok) do
-        now = Timex.now
-        events = Enum.map(EventCollector.getEvents(), &shiftMilisec(now, &1))
+        events = Enum.map(EventCollector.getEvents(), &shiftMilisec(Timex.now, &1))
         GenServer.stop(EventCollector)
         {:ok, RedBlackTree.new(events, comparator: &Schedule._comparator/2) }
     end

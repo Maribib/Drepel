@@ -5,7 +5,7 @@ defmodule Drepel.Env do
     defstruct [ id: 1, children: [], nodes: %{}, running: false, toRun: [] ]
 
     def new do
-        Agent.start_link(fn -> %__MODULE__{} end, name: unquote(__MODULE__))
+        Agent.start_link(fn -> %__MODULE__{} end, name: __MODULE__)
     end
 
     def get do
@@ -30,9 +30,9 @@ defmodule Drepel.Env do
          end
     end
 
-    def _addNode(env, parents, runFct, initState \\ &nilState/0) do
+    def _addNode(env, parents, runFct, initState \\ &nilState/0, isSink \\ false) do
         id = String.to_atom("dnode_#{env.id}")
-        newDNode = %DNode{ id: id, parents: parents, runFct: runFct, initState: initState }
+        newDNode = %DNode{ id: id, parents: parents, runFct: runFct, initState: initState, isSink: isSink }
         env = %{ env | toRun: env.toRun ++ [id] }
         env = Enum.reduce(parents, env, &_addChild/2 )
         { 
@@ -44,27 +44,60 @@ defmodule Drepel.Env do
         }
     end
 
-    def startAllMidNodes(env) do
-        nodes = env.toRun -- env.children
-        #IO.puts inspect nodes
+    def startAllMidNodes(env, nodes) do
         Enum.map(nodes, &DNode.Supervisor.start(Map.get(env.nodes, &1)))
         nodes
     end
 
-    def startAllSources(env) do
-        sources = env.children -- ( env.children -- env.toRun )
-        #IO.puts inspect sources
-        Enum.map(sources, fn id ->
-            aDNode = Map.get(env.nodes, id)
-            Source.Supervisor.start(fn -> aDNode.runFct.(aDNode) end)
-        end)
+    def startAllSources(env, sources) do
+        Enum.map(sources, &DNode.Supervisor.start(Map.get(env.nodes, &1)))
+        Enum.map(sources, &DNode.runSource(&1))
     end
 
     def startAllNodes do
         Agent.get_and_update(__MODULE__, fn env ->
-            nodes = startAllMidNodes(env)
-            startAllSources(env)
+            nodes = startAllMidNodes(env, env.toRun -- env.children)
+            startAllSources(env, env.children -- ( env.children -- env.toRun ))
             { nodes, %{ env | toRun: [] } }
+        end)
+    end
+
+    def addTmpChild(child, parent) do
+        Agent.update(__MODULE__, fn env ->
+            aDNode = Map.get(env.nodes, child)
+            %{ env | nodes: %{ env.nodes | child => %{ aDNode | children: aDNode.children ++ [parent] } } }
+        end)
+    end
+
+    def getAllAncestor(env, id) do
+        node = Map.get(env.nodes, id)
+        Enum.reduce(node.parents, MapSet.new([id]), fn parentId, acc ->
+            if parentId != :dnode_0 do
+                MapSet.union(getAllAncestor(env, parentId), acc)
+            else
+                acc
+            end
+        end)
+    end
+
+    def runWithAncestors(id) do 
+        Agent.update(__MODULE__, fn env ->
+            ancestors = MapSet.to_list(getAllAncestor(env, id))
+            ancestors = ancestors -- (ancestors -- env.toRun)
+            startAllMidNodes(env, ancestors -- env.children)
+            startAllSources(env, env.children -- ( env.children -- ancestors ))
+            %{ env | toRun: env.toRun -- ancestors }
+        end)
+    end
+
+    def removeWithAncestors(id) do
+        Agent.update(__MODULE__, fn env ->
+            ancestors = MapSet.to_list(getAllAncestor(env, id))
+            %{ env | 
+                toRun: env.toRun -- ancestors, 
+                children: env.children -- ancestors, 
+                nodes: Map.drop(env.nodes, ancestors)
+            }
         end)
     end
 
@@ -85,18 +118,19 @@ defmodule Drepel.Env do
     end
 
     def createSink(parents, fct) do
-        Agent.get_and_update(__MODULE__, &_addNode(&1, parents, fct))
+        Agent.get_and_update(__MODULE__, fn env -> _addNode(env, parents, fct,  &nilState/0, true) end)
         :ok
     end
 
     @errWrapper %{
         onNext: &__MODULE__._arity3ErrWrapper(&1), 
         onError: &__MODULE__._arity3ErrWrapper(&1), 
-        onCompleted: &__MODULE__._arity2ErrWrapper(&1) 
+        onCompleted: &__MODULE__._arity2ErrWrapper(&1),
+        onScheduled: &__MODULE__._arity2ErrWrapper(&1)
     }
 
     def nilState do
-        nil
+        fn -> nil end
     end
     
     @doc """ 
@@ -111,22 +145,24 @@ defmodule Drepel.Env do
     end
 
     def _arity2ErrWrapper(fct) do
-        fn obs, sender ->
-            try do
-                fct.(obs, sender)
-            catch
-                err, errStr -> Drepel.onError(obs, {err, errStr})
-            end
-        end
+        fct
+        #fn obs, arg1 ->
+        #    try do
+        #        fct.(obs, arg1)
+        #    catch
+        #        err, errStr -> Drepel.onError(obs, {err, errStr})
+        #    end
+        #end
     end
 
     def _arity3ErrWrapper(fct) do
-        fn obs, sender, val ->
-            try do
-                fct.(obs, sender, val)
-            catch
-                err, errStr -> Drepel.onError(obs, {err, errStr})
-            end
-        end
+        fct
+        #fn obs, arg1, arg2 ->
+        #    try do
+        #        fct.(obs, arg1, arg2)
+        #    catch
+        #        err, errStr -> Drepel.onError(obs, {err, errStr})
+        #    end
+        #end
     end
 end
