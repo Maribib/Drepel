@@ -346,11 +346,11 @@ defmodule Drepel do
         end)
     end
 
-    def _firstCondition(_bal) do
+    def _trueCond(_val) do
         true
     end
 
-    def first(%MockDNode{id: id}, condition \\ &_firstCondition/1) do
+    def first(%MockDNode{id: id}, condition \\ &_trueCond/1) do
         Drepel.Env.createMidNode([id], %{ 
             onNext: fn obs, _, val ->  
                 if obs.state and condition.(val) do
@@ -368,6 +368,27 @@ defmodule Drepel do
                 obs
             end
         }, fn -> true end)
+    end
+
+    def last(%MockDNode{id: id}, condition \\ &_trueCond/1) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                if condition.(val) do
+                    %{ obs | state: val }
+                else
+                    obs
+                end
+            end,
+            onCompleted: fn obs, _ ->
+                case obs.state do
+                    %Sentinel{} -> onError(obs, "Any element match condition.")
+                    _ -> 
+                        onNext(obs, obs.state)
+                        onCompleted(obs)
+                end
+                obs
+            end
+        }, fn -> %Sentinel{} end)
     end
 
     def debounce(%MockDNode{id: id}, timespan) do

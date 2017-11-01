@@ -213,6 +213,30 @@ defmodule DrepelTest do
         assert collected()==[{:err, "Any element match condition."}]
     end
 
+    test "last_1" do
+        from([2, 30, 22, 5, 60, 1])
+        |> last()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:compl, nil}]
+    end
+
+    test "last_2" do
+        from([2, 30, 22, 5, 60, 1])
+        |> last(fn el -> el>10 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 60}, {:compl, nil}]
+    end
+
+    test "last_3" do
+        from([2, 5, 1])
+        |> last(fn el -> el>10 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:err, "Any element match condition."}]
+    end
+
     test "debounce" do
         from([
             %{value: 0, time: 100},
