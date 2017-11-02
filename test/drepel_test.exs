@@ -181,6 +181,62 @@ defmodule DrepelTest do
         assert collected()==[{:next, 15}, {:compl, nil}]
     end
 
+    test "skip" do
+        range(0..4)
+        |> skip(3)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 3}, {:next, 4}, {:compl, nil}]
+    end
+
+    test "skipLast" do
+        range(1..4)
+        |> skipLast(2)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+    end
+
+    test "ignoreElements" do
+        range(0..4)
+        |> ignoreElements()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:compl, nil}]
+    end
+
+    test "sample" do
+        interval(30)
+        |> sample(100)
+        |> collector
+        Drepel.run(205)
+        assert collected()==[{:next, 2}, {:next, 5}]
+    end
+
+    test "elementAt_1" do
+        range(0..4)
+        |> elementAt(2)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 2}, {:compl, nil}]
+    end
+
+    test "elementAt_2" do
+        range(0..1)
+        |> elementAt(2)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:err, "Argument out of range"}]
+    end
+
+    test "distinct" do
+        from([1, 2, 2, 1, 3])
+        |> distinct()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+    end
+
     test "filter" do
         from([2, 30, 22, 5, 60, 1])
         |> filter(fn el -> el>10 end)
@@ -253,6 +309,22 @@ defmodule DrepelTest do
         |> collector
         Drepel.run()
         assert collected()==[{:next, 0}, {:next, 2}, {:next, 4}, {:compl, nil}]
+    end
+
+    test "take" do
+        range(0, 5)
+        |> take(3)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:compl, nil}]
+    end
+
+    test "takeLast" do
+        range(0, 5)
+        |> takeLast(3)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 3}, {:next, 4}, {:next, 5}, {:compl, nil}]
     end
 
     test "max" do

@@ -337,6 +337,98 @@ defmodule Drepel do
         }, fn -> init end)
     end
 
+    def skip(%MockDNode{id: id}, nb) when is_integer(nb) do
+        Drepel.Env.createMidNode([id], fn obs, _, val ->  
+            if (obs.state>0) do
+                %{ obs | state: obs.state-1 }
+            else
+                onNext(obs, val)
+                obs
+            end
+        end, fn -> nb end)
+    end
+
+    def skipLast(%MockDNode{id: id}, nb) when is_integer(nb) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                if obs.state.size==nb do
+                    [ head | tail ] = obs.state.buff
+                    onNext(obs, head)
+                    %{ obs | state: %{ obs.state | buff: tail ++ [val] } }
+                else
+                    %{ obs | state: %{ obs.state | buff: obs.state.buff ++ [val], size: obs.state.size+1 } }
+                end
+            end,
+        }, fn -> %{ buff: [], size: 0 } end)
+    end
+
+    def elementAt(%MockDNode{id: id}, pos) when is_integer(pos) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->  
+                if obs.state==0 do
+                    onNext(obs, val)
+                    onCompleted(obs)
+                end
+                %{ obs | state: obs.state-1 }
+            end,
+            onCompleted: fn obs, _ ->
+                if obs.state>=0 do
+                    onError(obs, "Argument out of range")
+                end
+                obs
+            end
+        }, fn -> pos end)
+    end
+
+    def _extractKey(v), do: v
+
+    def distinct(%MockDNode{id: id}, extractKey \\ &_extractKey/1) do
+        Drepel.Env.createMidNode([id], fn obs, _, val ->  
+            key = extractKey.(val)
+            if (RedBlackTree.has_key?(obs.state, key)) do
+                obs
+            else
+                onNext(obs, val)
+                %{ obs | state: RedBlackTree.insert(obs.state, key) }
+            
+            end
+        end, fn -> RedBlackTree.new() end)
+    end
+
+    def ignoreElements(%MockDNode{id: id}) do
+        Drepel.Env.createMidNode([id], fn obs, _, _val ->  
+            obs
+        end)
+    end
+
+    def sample(%MockDNode{id: id}, timespan) when is_integer(timespan) do
+        res = Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                %{ obs | state: %{ obs.state | val: val } }
+            end,
+            onCompleted: fn obs, _ ->
+                onCompleted(obs)
+                %{ obs | state: %{ obs.state | compl: true } }
+            end,
+            onScheduled: fn obs, _name ->
+                if !obs.state.compl do
+                    case obs.state.val do
+                        %Sentinel{} -> obs
+                        _ ->
+                            onNext(obs, obs.state.val)
+                            %{ obs | state: %{ obs.state | val: %Sentinel{} } }
+                    end
+                else
+                    obs
+                end
+            end
+        }, fn -> %{ val: %Sentinel{}, compl: false } end)
+        EventCollector.schedule(res, timespan, nil, fn event ->
+            %{ event | time: Timex.shift(event.time, microseconds: timespan*1000) } 
+        end)
+        res
+    end
+
     def filter(%MockDNode{id: id}, condition) do
         Drepel.Env.createMidNode([id], fn obs, _, val ->  
             if condition.(val) do
@@ -414,6 +506,41 @@ defmodule Drepel do
                 end
             end
         }, fn -> %{ val: %Sentinel{}, count: 0, eid: 0 } end)
+    end
+
+    def take(%MockDNode{id: id}, nb) when is_integer(nb) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                if obs.state>0 do
+                    onNext(obs, val)
+                end
+                if obs.state==0 do
+                    onCompleted(obs)
+                end
+                %{ obs | state: obs.state-1 }
+            end,
+            onCompleted: fn obs, _ ->
+                obs
+            end
+        }, fn -> nb end)  
+    end
+
+    def takeLast(%MockDNode{id: id}, nb) when is_integer(nb) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val ->
+                if obs.state.size==nb do
+                    [head | tail] = obs.state.buff
+                    %{ obs | state: %{ obs.state | buff: tail ++ [val] } }
+                else
+                    %{ obs | state: %{ obs.state | buff: obs.state.buff ++ [val], size: obs.state.size+1 } }
+                end
+            end,
+            onCompleted: fn obs, _ ->
+                Enum.map(obs.state.buff, &onNext(obs, &1))
+                onCompleted(obs)
+                obs
+            end
+        }, fn -> %{ buff: [], size: 0 } end)
     end
 
     def _extremum(id, comparator) do
