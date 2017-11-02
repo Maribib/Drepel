@@ -537,7 +537,7 @@ defmodule Drepel do
         Drepel.Env.createMidNode([id], %{
             onNext: fn obs, _, val ->
                 if obs.state.size==nb do
-                    [head | tail] = obs.state.buff
+                    [_ | tail] = obs.state.buff
                     %{ obs | state: %{ obs.state | buff: tail ++ [val] } }
                 else
                     %{ obs | state: %{ obs.state | buff: obs.state.buff ++ [val], size: obs.state.size+1 } }
@@ -583,6 +583,36 @@ defmodule Drepel do
 
     def merge(%MockDNode{}=dnode1, %MockDNode{}=dnode2) do
         merge([dnode1, dnode2])
+    end
+
+    def startWith(%MockDNode{id: id}, v1, v2 \\ nil, v3 \\ nil, v4 \\ nil, v5 \\ nil, v6 \\ nil, v7 \\ nil, v8 \\ nil, v9 \\ nil) do
+        values = Enum.to_list(binding() |> tl() |> Stream.filter(fn {_, b} -> !is_nil(b) end) |> Stream.map(fn {_, b} -> b end))
+        res = Drepel.Env.createMidNode([id], %{
+            onNext: fn obs, _, val -> 
+                if obs.state.done do
+                    onNext(obs, val)
+                    obs
+                else
+                    %{ obs | state: %{ obs.state | values: obs.state.values ++ [val] } }
+                end
+            end,
+            onError: fn obs, _, err ->
+                Enum.map(obs.state.values, &onNext(obs, &1))
+                onError(obs, err)
+                %{ obs | state: %{ obs.state | done: true } }
+            end,
+            onCompleted: fn obs, _ ->
+                Enum.map(obs.state.values, &onNext(obs, &1))
+                onCompleted(obs)
+                %{ obs | state: %{ obs.state | done: true } }
+            end,
+            onScheduled: fn obs, _ -> 
+                Enum.map(obs.state.values, &onNext(obs, &1))
+                %{ obs | state: %{ obs.state | done: true } }
+            end
+        }, fn -> %{ values: values, done: false } end)
+        EventCollector.schedule(res, 0)
+        res
     end
 
     def _extremum(id, comparator) do

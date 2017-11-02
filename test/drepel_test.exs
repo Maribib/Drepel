@@ -366,6 +366,14 @@ defmodule DrepelTest do
         assert collected()==[{:next, 42}, {:err, ["err1", "err2"]}]
     end
 
+    test "startWith" do
+        from([1, 2, 3])
+        |> startWith(0)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+    end
+
     test "max" do
         from([1, 2, 3])
         |> max()
