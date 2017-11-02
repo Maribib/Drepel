@@ -71,11 +71,14 @@ defmodule DNode do
 
     def handle_cast({:onError, sender, err}, aDNode) do
         #IO.puts "onError"
-        case aDNode.runFct do
-            %{onErrorSink: errFct} -> errFct.(err)
+        aDNode = case aDNode.runFct do
+            %{onErrorSink: errFct} -> 
+                errFct.(err)
+                aDNode
             %{onError: errFct} -> errFct.(aDNode, sender, err)
             _ -> 
                 Drepel.onError(aDNode, err) # propagate
+                aDNode
         end
         if aDNode.isSink do
             Manager.normalExit(self())

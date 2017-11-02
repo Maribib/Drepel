@@ -312,6 +312,10 @@ defmodule Drepel do
                 Scheduler.schedule(obs, timespan, :onCompleted, nil, obs.state.eid)
                 %{ obs | state: %{ obs.state | eid: obs.state.eid+1 } }
             end,
+            onError: fn obs, _, err ->
+                Scheduler.schedule(obs, timespan, :onError, nil, obs.state.eid)
+                %{ obs | state: %{ obs.state | buff: obs.state.buff ++ [err], eid: obs.state.eid+1 } }
+            end,
             onScheduled: fn obs, name ->
                 case name do
                     :onNext ->
@@ -321,6 +325,10 @@ defmodule Drepel do
                     :onCompleted -> 
                         onCompleted(obs)
                         obs
+                    :onError ->
+                        [head | tail] = obs.state.buff
+                        onError(obs, head)
+                        %{ obs | state: %{ obs.state | buff: tail } }
                 end
             end
         }, fn -> %{ buff: [], eid: 0 } end)
@@ -541,6 +549,40 @@ defmodule Drepel do
                 obs
             end
         }, fn -> %{ buff: [], size: 0 } end)
+    end
+
+    def merge(dnodes) when is_list(dnodes) do
+        Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
+            onNext: fn obs, _, val ->
+                onNext(obs, val)
+                obs
+            end,
+            onCompleted: fn obs, sender ->
+                compl = obs.state.compl ++ [sender]
+                if length(obs.parents -- compl)==0 do
+                    if obs.state.errBuff == [] do
+                        onCompleted(obs)
+                    else
+                        onError(obs, obs.state.errBuff)
+                    end
+                end
+                %{ obs | state: %{ obs.state | compl: compl } }
+            end,
+            onError: fn obs, sender, err ->
+                compl = obs.state.compl ++ [sender]
+                if length(obs.parents -- compl)==0 do
+                    onError(obs, obs.state.errBuff ++ [err])
+                end
+                %{ obs | state: %{ obs.state | 
+                    errBuff: obs.state.errBuff ++ [err], 
+                    compl: compl} 
+                }
+            end
+        }, fn -> %{ errBuff: [], compl: [] } end)
+    end
+
+    def merge(%MockDNode{}=dnode1, %MockDNode{}=dnode2) do
+        merge([dnode1, dnode2])
     end
 
     def _extremum(id, comparator) do

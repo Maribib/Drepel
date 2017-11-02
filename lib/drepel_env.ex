@@ -150,7 +150,9 @@ defmodule Drepel.Env do
         #    try do
         #        fct.(obs, arg1)
         #    catch
-        #        err, errStr -> Drepel.onError(obs, {err, errStr})
+        #        err, errStr -> 
+        #            Drepel.onError(obs, {err, errStr})
+        #            obs
         #    end
         #end
     end
@@ -161,7 +163,9 @@ defmodule Drepel.Env do
         #    try do
         #        fct.(obs, arg1, arg2)
         #    catch
-        #        err, errStr -> Drepel.onError(obs, {err, errStr})
+        #        err, errStr -> 
+        #            Drepel.onError(obs, {err, errStr})
+        #            obs
         #    end
         #end
     end

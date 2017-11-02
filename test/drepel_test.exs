@@ -327,6 +327,45 @@ defmodule DrepelTest do
         assert collected()==[{:next, 3}, {:next, 4}, {:next, 5}, {:compl, nil}]
     end
 
+    test "merge_1" do
+        n1 = from([
+            %{value: 20, time: 30},
+            %{value: 40, time: 30},
+            %{value: 60, time: 30},
+            %{value: 80, time: 30},
+            %{value: 100, time: 30}
+        ]) |> flatmap(fn item ->
+            from(item.value)
+            |> delay(item.time)
+        end)
+        n2 = from([
+            %{value: 1, time: 105},
+            %{value: 1, time: 160}
+        ])
+        |> flatmap(fn item ->
+            from(item.value)
+            |> delay(item.time)
+        end)
+
+        merge(n1, n2)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 20}, {:next, 40}, {:next, 60}, {:next, 1}, {:next, 80}, {:next, 100}, {:next, 1}, {:compl, nil}]
+    end
+
+    test "merge_2" do
+        n1 = Drepel.throw("err1")
+        |> delay(25)
+        n2 = Drepel.throw("err2")
+        |> delay(50)
+        n3 = just(42)
+
+        merge([n1, n2, n3])
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 42}, {:err, ["err1", "err2"]}]
+    end
+
     test "max" do
         from([1, 2, 3])
         |> max()
