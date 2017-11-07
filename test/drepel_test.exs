@@ -37,17 +37,30 @@ defmodule DrepelTest do
         assert collected()==[{:next, 42}, {:next, 41}, {:compl, nil}]
     end
 
-    
     test "create 1source-2sub" do
+        subFct = fn tag ->
+            [ fn val -> 
+                Agent.update(__MODULE__, &( &1 ++ [{ :next, tag, val }] ))
+            end, 
+            fn err -> 
+                Agent.update(__MODULE__, &( &1 ++ [{ :err, tag, err }] ))
+            end, 
+            fn ->
+                Agent.update(__MODULE__, &( &1 ++ [{ :compl, tag, nil }] ))
+            end ]
+        end
+
         n = create(fn obs ->
             onNext(obs, 42)
             onNext(obs, 41)
             onCompleted(obs)
         end)
-        n |> collector
-        n |> collector
+        apply(&subscribe/4, [n] ++ subFct.(:c1))
+        apply(&subscribe/4, [n] ++ subFct.(:c2))
         Drepel.run()
-        assert collected()==[{:next, 42}, {:next, 42}, {:next, 41}, {:next, 41}, {:compl, nil}, {:compl, nil}]
+        res = collected()
+        assert Enum.filter(res, fn {_stream, tag, _val} -> tag==:c1 end)==[{:next, :c1, 42}, {:next, :c1, 41}, {:compl, :c1, nil}]
+        assert Enum.filter(res, fn {_stream, tag, _val} -> tag==:c2 end)==[{:next, :c2, 42}, {:next, :c2, 41}, {:compl, :c2, nil}]
     end
 
     test "just" do
@@ -117,7 +130,10 @@ defmodule DrepelTest do
         interval(50)
         |> collector
         Drepel.run(200)
-        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}]
+        case length(collected()) do
+            3 -> assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}]
+            4 -> assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}]
+        end
     end
 
     test "map" do
@@ -149,17 +165,20 @@ defmodule DrepelTest do
     test "buffer" do
         interval(25)
         |> buffer(interval(100))
+        |> take(2)
         |> collector
-        Drepel.run(200)
+        Drepel.run(250)
         assert collected()==[{:next, [0, 1, 2, 3]}, {:next, [4, 5, 6, 7]}]
     end
 
     test "bufferBoundaries" do
         interval(25)
         |> bufferBoundaries(interval(100))
+        |> take(2)
         |> collector
-        Drepel.run(300)
-        assert collected()==[{:next, [3, 4, 5, 6]}, {:next, [7, 8, 9, 10]}]
+        Drepel.run(350)
+        assert length(collected())==2
+        Enum.map(collected(), fn {:next, buff} -> assert length(buff)==4 end)
     end
 
     # TODO bufferSwitch
@@ -391,6 +410,14 @@ defmodule DrepelTest do
         |> collector
         Drepel.run()
         assert collected()==[{:next, "1A"}, {:next, "2B"}, {:next, "3C"}, {:next, "4D"}, {:compl, nil}]
+    end
+
+    test "combineLatest" do
+        combineLatest(interval(50) |> delay(25), interval(50), fn v1, v2 -> "#{v1} #{v2}" end)
+        |> take(7)
+        |> collector
+        Drepel.run(240)
+        assert collected()==[{:next, "0 0"}, {:next, "0 1"}, {:next, "1 1"}, {:next, "1 2"}, {:next, "2 2"}, {:next, "2 3"}, {:next, "3 3"}]
     end
 
     test "startWith" do

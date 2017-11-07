@@ -599,7 +599,11 @@ defmodule Drepel do
                     end)
                     onNext(nod, apply(zipFct, args))
                     if compl do
-                        onCompleted(nod)
+                        if length(nod.state.errBuff)>0 do
+                            onError(nod, nod.state.errBuff)
+                        else
+                            onCompleted(nod)
+                        end
                     end 
                     %{ nod | state: %{ nod.state | buffs: buffs, ready: ready, compl: compl } }
                 else
@@ -618,15 +622,20 @@ defmodule Drepel do
                     nod                   
                 end
             end,
-            onError: fn nod, _, err ->
-                if nod.state.compl do
-                    nod
+            onError: fn nod, sender, err ->
+                if !nod.state.compl do
+                    if :queue.is_empty(Map.get(nod.state.buffs, sender)) do
+                        onError(nod, nod.state.errBuff ++ [err])
+                        %{ nod | state: %{ nod.state | compl: true } }
+                    else
+                        %{ nod | state: %{ nod.state | compls: %{ nod.state.compls | sender => true }, errBuff: nod.state.errBuff ++ [err] } }
+                    end
                 else
-                    onError(nod, err)
-                    %{ nod | state: %{ nod.state | compl: true } }
+                    nod                   
                 end
             end
         }, fn nod -> %{ 
+            errBuff: [],
             compl: false, 
             ready: 0, 
             nbParents: length(nod.parents), 
@@ -639,10 +648,57 @@ defmodule Drepel do
         zip([dnode1, dnode2], zipFct)
     end
 
+    def combineLatest(dnodes, combineFct) when is_list(dnodes) do
+        Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
+            onNext: fn nod, sender, val ->
+                state = %{ nod.state | vals: %{ nod.state.vals | sender => val }, ready: nod.state.ready-(Map.get(nod.state.vals, sender)==%Sentinel{} && 1 || 0) }
+                if (state.ready==0) do
+                    onNext(nod, apply(combineFct, Enum.map(nod.parents, fn id -> Map.get(state.vals, id) end)))
+                end
+                %{ nod | state: state }
+            end,
+            onCompleted: fn nod, sender ->
+                if Map.get(nod.state.compls, sender) do
+                    nod
+                else
+                    if (nod.state.compl==1) do
+                        if length(nod.state.errBuff)>0 do
+                            onError(nod, nod.state.errBuff)
+                        else
+                            onCompleted(nod)
+                        end
+                    end
+                    %{ nod | state: %{ nod.state | compls: %{ nod.state.compls | sender => true }, compl: nod.state.compl+1 } }
+                end
+            end,
+            onError: fn nod, sender, err ->
+                if Map.get(nod.state.compls, sender) do
+                    nod
+                else
+                    if (nod.state.compl==1) do
+                        onError(nod, nod.state.errBuff ++ [err])
+                    end
+                    %{ nod | state: %{ nod.state | compls: %{ nod.state.compls | sender => true }, compl: nod.state.compl+1, errBuff: nod.state.errBuff ++ [err] } }
+                end
+            end
+        }, fn nod -> %{
+            errBuff: [],
+            ready: length(nod.parents), 
+            compl: length(nod.parents), 
+            vals: Enum.reduce(nod.parents, %{}, fn id, acc -> Map.put(acc, id, %Sentinel{}) end),
+            compls: Enum.reduce(nod.parents, %{}, fn id, acc -> Map.put(acc, id, false) end)
+        } end)
+    end
+
+    def combineLatest(%MockDNode{}=dnode1, %MockDNode{}=dnode2, combineFct) do
+        combineLatest([dnode1, dnode2], combineFct)
+    end
+
     def startWith(%MockDNode{id: id}, v1, v2 \\ nil, v3 \\ nil, v4 \\ nil, v5 \\ nil, v6 \\ nil, v7 \\ nil, v8 \\ nil, v9 \\ nil) do
         values = Enum.to_list(binding() |> tl() |> Stream.filter(fn {_, b} -> !is_nil(b) end) |> Stream.map(fn {_, b} -> b end))
         res = Drepel.Env.createMidNode([id], %{
             onNext: fn nod, _, val -> 
+                #IO.puts "startWith onNext"
                 if nod.state.done do
                     onNext(nod, val)
                     nod
@@ -651,18 +707,22 @@ defmodule Drepel do
                 end
             end,
             onError: fn nod, _, err ->
+                #IO.puts "startWith onError"
                 Enum.map(nod.state.values, &onNext(nod, &1))
                 onError(nod, err)
-                %{ nod | state: %{ nod.state | done: true } }
+                %{ nod | state: %{ nod.state | done: true, values: [] } }
             end,
             onCompleted: fn nod, _ ->
+                #IO.puts "startWith onCompleted"
                 Enum.map(nod.state.values, &onNext(nod, &1))
                 onCompleted(nod)
-                %{ nod | state: %{ nod.state | done: true } }
+                %{ nod | state: %{ nod.state | done: true, values: [] } }
             end,
             onScheduled: fn nod, _ -> 
+                #IO.puts "startWith onScheduled"
+                #IO.puts inspect nod.state.values
                 Enum.map(nod.state.values, &onNext(nod, &1))
-                %{ nod | state: %{ nod.state | done: true } }
+                %{ nod | state: %{ nod.state | done: true, values: [] } }
             end
         }, fn _ -> %{ values: values, done: false } end)
         EventCollector.schedule(res, 0)
