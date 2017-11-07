@@ -492,6 +492,20 @@ defmodule DrepelTest do
         assert collected()==[{:next, 42}, {:compl, nil}]
     end
 
+    test "sequenceEqual_1" do
+        sequenceEqual([range(1..3), range(1..3) |> delay(50), range(1..3) |> delay(100)])
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, true}, {:compl, nil}]
+    end
+
+    test "sequenceEqual_2" do
+        sequenceEqual([range(1..3), range(1..3) |> delay(50), range(1..4) |> delay(100)])
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, false}, {:compl, nil}]
+    end
+
     test "max" do
         from([1, 2, 3])
         |> max()

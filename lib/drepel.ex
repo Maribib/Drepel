@@ -590,12 +590,19 @@ defmodule Drepel do
             onNext: fn nod, sender, val ->
                 aQueue = Map.get(nod.state.buffs, sender)
                 isReady = :queue.len(aQueue)==0
-                nod = %{ nod | state: %{ nod.state | buffs: %{ nod.state.buffs | sender => :queue.in(val, aQueue) }, ready: nod.state.ready+(isReady && 1 || 0) } }
+                nod = %{ nod | state: %{ nod.state | 
+                    buffs: %{ nod.state.buffs | sender => :queue.in(val, aQueue) }, 
+                    ready: nod.state.ready+(isReady && 1 || 0) 
+                } }
                 if nod.state.ready==nod.state.nbParents do
                     {ready, args, buffs, compl} = Enum.reduce(nod.state.buffs, {0, [], %{}, false}, fn {nodeId, aQueue}, {ready, args, buffs, compl} ->
                         {{:value, val}, aQueue} = :queue.out(aQueue)
                         isEmpty = :queue.is_empty(aQueue)
-                        { ready+(isEmpty && 0 || 1), args ++ [val], Map.put(buffs, nodeId, aQueue), compl or (isEmpty and Map.get(nod.state.compls, nodeId)) }
+                        { 
+                            ready+(isEmpty && 0 || 1), args ++ [val], 
+                            Map.put(buffs, nodeId, aQueue), 
+                            compl or (isEmpty and Map.get(nod.state.compls, nodeId)) 
+                        }
                     end)
                     onNext(nod, apply(zipFct, args))
                     if compl do
@@ -628,7 +635,10 @@ defmodule Drepel do
                         onError(nod, nod.state.errBuff ++ [err])
                         %{ nod | state: %{ nod.state | compl: true } }
                     else
-                        %{ nod | state: %{ nod.state | compls: %{ nod.state.compls | sender => true }, errBuff: nod.state.errBuff ++ [err] } }
+                        %{ nod | state: %{ nod.state | 
+                            compls: %{ nod.state.compls | sender => true }, 
+                            errBuff: nod.state.errBuff ++ [err] 
+                        } }
                     end
                 else
                     nod                   
@@ -651,7 +661,10 @@ defmodule Drepel do
     def combineLatest(dnodes, combineFct) when is_list(dnodes) do
         Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
             onNext: fn nod, sender, val ->
-                state = %{ nod.state | vals: %{ nod.state.vals | sender => val }, ready: nod.state.ready-(Map.get(nod.state.vals, sender)==%Sentinel{} && 1 || 0) }
+                state = %{ nod.state | 
+                    vals: %{ nod.state.vals | sender => val }, 
+                    ready: nod.state.ready-(Map.get(nod.state.vals, sender)==%Sentinel{} && 1 || 0) 
+                }
                 if (state.ready==0) do
                     onNext(nod, apply(combineFct, Enum.map(nod.parents, fn id -> Map.get(state.vals, id) end)))
                 end
@@ -668,7 +681,10 @@ defmodule Drepel do
                             onCompleted(nod)
                         end
                     end
-                    %{ nod | state: %{ nod.state | compls: %{ nod.state.compls | sender => true }, compl: nod.state.compl+1 } }
+                    %{ nod | state: %{ nod.state | 
+                        compls: %{ nod.state.compls | sender => true },
+                        compl: nod.state.compl+1 
+                    } }
                 end
             end,
             onError: fn nod, sender, err ->
@@ -678,7 +694,11 @@ defmodule Drepel do
                     if (nod.state.compl==1) do
                         onError(nod, nod.state.errBuff ++ [err])
                     end
-                    %{ nod | state: %{ nod.state | compls: %{ nod.state.compls | sender => true }, compl: nod.state.compl+1, errBuff: nod.state.errBuff ++ [err] } }
+                    %{ nod | state: %{ nod.state | 
+                        compls: %{ nod.state.compls | sender => true }, 
+                        compl: nod.state.compl+1, 
+                        errBuff: nod.state.errBuff ++ [err] 
+                    } }
                 end
             end
         }, fn nod -> %{
@@ -702,7 +722,7 @@ defmodule Drepel do
                     onNext(nod, val)
                     nod
                 else
-                    %{ nod | state: %{ nod.state | values: nod.state.values ++ [val] } }
+                    update_in(nod.state.values, &(&1 ++ [val]))
                 end
             end,
             onError: fn nod, _, err ->
@@ -840,6 +860,95 @@ defmodule Drepel do
                 nod
             end
         }, fn _ -> false end)
+    end
+
+    def sequenceEqual(dnodes) when is_list(dnodes) do
+        Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
+            onNext: fn nod, sender, val ->
+                if nod.state.isEqual do
+                    index = Map.get(nod.state.indexes, sender)
+                    if index<nod.state.length do
+                        if Enum.at(nod.state.buff, index)!=val do
+                            update_in(nod.state.isEqual, fn _ -> false end)
+                        else
+                            compared = Enum.at(nod.state.compared, index)
+                            nod = %{ nod | state: %{ nod.state | 
+                                indexes: %{ nod.state.indexes | sender => index+1 }, 
+                                compared: List.insert_at(nod.state.compared, index, compared+1) 
+                            } }
+                            if index==0 and compared+1==nod.state.nbParents do
+                                %{ nod | state: 
+                                    %{ nod.state | 
+                                        compared: tl(nod.state.compared), 
+                                        indexes: Enum.reduce(nod.state.indexes, %{}, fn {id, index}, acc -> Map.put(acc, id, index-1) end),
+                                        length: nod.state.length-1,
+                                        buff: tl(nod.state.buff)
+                                    } 
+                                }
+                            else
+                                nod
+                            end
+                        end
+                    else
+                        %{ nod | state: %{ nod.state | 
+                            buff: nod.state.buff ++ [val], 
+                            length: nod.state.length+1, 
+                            compared: nod.state.compared ++ [1], 
+                            indexes: %{ nod.state.indexes | sender => index+1 } 
+                        } }
+                    end
+                else
+                    nod
+                end
+            end,
+            onError: fn nod, sender, err ->
+                if !Map.get(nod.state.compls, sender) do
+                    if nod.state.compl+1==nod.state.nbParents do
+                        onNext(nod, nod.state.isEqual and nod.state.length==0)
+                        onError(nod, nod.state.errBuff ++ [err])
+                    end
+                    %{ nod | state: %{ nod.state | 
+                        compls: %{ nod.state.compls | sender => true }, 
+                        compl: nod.state.compl+1, 
+                        errBuff: nod.state.errBuff ++ [err] 
+                    } }
+                else
+                    nod
+                end
+            end,
+            onCompleted: fn nod, sender ->
+                 if !Map.get(nod.state.compls, sender) do
+                    if nod.state.compl+1==nod.state.nbParents do
+                        onNext(nod, nod.state.isEqual and nod.state.length==0)
+                        if length(nod.state.errBuff)>0 do
+                            onError(nod, nod.state.errBuff)
+                        else
+                            onCompleted(nod)
+                        end
+                    end
+                    %{ nod | state: %{ nod.state | 
+                        compls: %{ nod.state.compls | sender => true }, 
+                        compl: nod.state.compl+1 
+                    } }
+                else
+                    nod
+                end
+            end
+        }, fn nod -> %{
+            errBuff: [],
+            compl: 0,
+            compls: Enum.reduce(nod.parents, %{}, fn id, acc -> Map.put(acc, id, false) end),
+            nbParents: length(nod.parents),
+            isEqual: true,
+            buff: [],
+            length: 0,
+            compared: [],
+            indexes: Enum.reduce(nod.parents, %{}, fn id, acc -> Map.put(acc, id, 0) end)
+        } end) 
+    end
+
+    def sequenceEqual(%MockDNode{}=dnode1, %MockDNode{}=dnode2) do
+        sequenceEqual([dnode1, dnode2])
     end
 
     def _extremum(id, comparator) do
