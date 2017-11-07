@@ -1023,6 +1023,39 @@ defmodule Drepel do
         }, fn _ -> true end)
     end
 
+    def takeWhile(%MockDNode{id: id}, takeFct) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val ->
+                if nod.state do
+                    if !takeFct.(val) do
+                        onCompleted(nod)
+                        %{ nod | state: false }
+                    else
+                        onNext(nod, val)
+                        nod
+                    end
+                else
+                    nod
+                end
+            end, 
+            onCompleted: fn nod, _ ->
+                if nod.state do
+                    onCompleted(nod)
+                    %{ nod | state: false }
+                else 
+                    nod
+                end
+            end, onError: fn nod, _, err ->
+                if nod.state do
+                    onError(nod, err)
+                    %{ nod | state: false }
+                else 
+                    nod
+                end
+            end
+        }, fn _ -> true end)  
+    end
+
     def _extremum(id, comparator) do
         Drepel.Env.createMidNode([id], %{
             onNext: fn nod, _, val ->

@@ -545,6 +545,14 @@ defmodule DrepelTest do
         assert collected()==[{:compl, nil}]
     end
 
+    test "takeWhile" do
+        range(1..5)
+        |> takeWhile(fn el -> el != 3 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+    end
+
     test "max" do
         from([1, 2, 3])
         |> max()
