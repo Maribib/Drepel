@@ -416,8 +416,8 @@ defmodule DrepelTest do
         combineLatest(interval(50) |> delay(25), interval(50), fn v1, v2 -> "#{v1} #{v2}" end)
         |> take(7)
         |> collector
-        Drepel.run(240)
-        assert collected()==[{:next, "0 0"}, {:next, "0 1"}, {:next, "1 1"}, {:next, "1 2"}, {:next, "2 2"}, {:next, "2 3"}, {:next, "3 3"}]
+        Drepel.run(300)
+        assert collected()==[{:next, "0 0"}, {:next, "0 1"}, {:next, "1 1"}, {:next, "1 2"}, {:next, "2 2"}, {:next, "2 3"}, {:next, "3 3"}, {:compl, nil}]
     end
 
     test "startWith" do
@@ -504,6 +504,45 @@ defmodule DrepelTest do
         |> collector
         Drepel.run()
         assert collected()==[{:next, false}, {:compl, nil}]
+    end
+
+    test "sequenceEqual_3" do
+        sequenceEqual([range(1..3), range(2..4) |> delay(50), range(1..3) |> delay(100)])
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, false}, {:compl, nil}]
+    end
+
+    test "skipUntil" do
+        interval(50)
+        |> skipUntil(timer(120))
+        |> collector
+        Drepel.run(280)
+        assert collected()==[{:next, 2}, {:next, 3}, {:next, 4}]
+    end
+
+    test "skipWhile" do
+        range(1..5)
+        |> skipWhile(fn el -> el != 3 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 3}, {:next, 4}, {:next, 5}, {:compl, nil}]
+    end
+
+    test "takeUntil_1" do
+        interval(50)
+        |> takeUntil(timer(120))
+        |> collector
+        Drepel.run(280)
+        assert collected()==[{:next, 0}, {:next, 1}, {:compl, nil}]
+    end
+
+    test "takeUntil_2" do
+        empty()
+        |> takeUntil(timer(100, 42))
+        |> collector
+        Drepel.run()
+        assert collected()==[{:compl, nil}]
     end
 
     test "max" do

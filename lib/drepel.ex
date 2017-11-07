@@ -951,6 +951,78 @@ defmodule Drepel do
         sequenceEqual([dnode1, dnode2])
     end
 
+    def skipUntil(%MockDNode{id: id1}, %MockDNode{id: id2}) do
+        Drepel.Env.createMidNode([id1, id2], %{
+            onNext: fn nod, sender, val ->
+                case sender do
+                    ^id1 ->
+                        if nod.state do
+                            onNext(nod, val)
+                        end
+                        nod
+                    ^id2 -> %{ nod | state: true }
+                end
+            end,
+            onCompleted: fn nod, sender ->
+                if sender==id1 do
+                    onCompleted(nod)
+                end
+                nod
+            end,
+            onError: fn nod, sender, err ->
+                if sender==id1 do
+                    onError(nod, err)
+                end
+                nod
+            end
+        }, fn _ -> false end)  
+    end
+
+    def skipWhile(%MockDNode{id: id}, skipFct) do
+        Drepel.Env.createMidNode([id], fn nod, _, val ->
+            if nod.state do
+                onNext(nod, val)
+                nod
+            else
+                if !skipFct.(val) do
+                    onNext(nod, val)
+                    %{ nod | state: true }
+                else 
+                    nod
+                end
+            end
+        end, fn _ -> false end)  
+    end
+
+    def takeUntil(%MockDNode{id: id1}, %MockDNode{id: id2}) do
+        Drepel.Env.createMidNode([id1, id2], %{
+            onNext: fn nod, sender, val ->
+                case sender do
+                    ^id1 ->
+                        if nod.state do
+                            onNext(nod, val)
+                        end
+                        nod
+                    ^id2 -> 
+                        onCompleted(nod)
+                        %{ nod | state: false }
+                end
+            end,
+            onCompleted: fn nod, sender ->
+                if nod.state and sender==id1 do
+                    onCompleted(nod)
+                end
+                nod
+            end,
+            onError: fn nod, sender, err ->
+                if nod.state and sender==id1 do
+                    onError(nod, err)
+                end
+                nod
+            end
+        }, fn _ -> true end)
+    end
+
     def _extremum(id, comparator) do
         Drepel.Env.createMidNode([id], %{
             onNext: fn nod, _, val ->
