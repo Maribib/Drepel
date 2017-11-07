@@ -3,7 +3,7 @@ defmodule Manager do
 
     # Client API
 
-    def start_link(_args, opts) do
+    def start_link(_args, _opts) do
         GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
@@ -21,7 +21,7 @@ defmodule Manager do
         Process.monitor(pid)
         Supervisor.terminate_child(DNode.Supervisor, pid)
         receive do
-            {:DOWN, ref, :process, ^pid, :shutdown} -> :ok
+            {:DOWN, _ref, :process, ^pid, :shutdown} -> :ok
         after 
             1000 -> Process.exit(pid, :kill)
         end

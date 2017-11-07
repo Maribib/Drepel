@@ -19,7 +19,7 @@ defmodule Schedule do
 
     # Client API
 
-    def start_link(args, _opts \\ nil) do
+    def start_link(_args, _opts \\ nil) do
         GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 

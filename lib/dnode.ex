@@ -39,7 +39,7 @@ defmodule DNode do
     # Server API
 
     def init(%DNode{}=aDNode) do
-        { :ok, %{ aDNode | state: aDNode.initState.() } }
+        { :ok, %{ aDNode | state: aDNode.initState.(aDNode) } }
     end
 
     def handle_cast({:onNext, sender, value}, aDNode) do
@@ -53,7 +53,7 @@ defmodule DNode do
     end
 
     def handle_cast({:onCompleted, sender}, aDNode) do
-        #IO.puts "onCompleted"
+        #IO.puts "#{aDNode.id} onCompleted"
         aDNode = case aDNode.runFct do
             %{onCompletedSink: complFct} -> 
                 complFct.()

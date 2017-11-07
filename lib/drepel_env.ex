@@ -30,7 +30,7 @@ defmodule Drepel.Env do
          end
     end
 
-    def _addNode(env, parents, runFct, initState \\ &nilState/0, isSink \\ false) do
+    def _addNode(env, parents, runFct, initState \\ &nilState/1, isSink \\ false) do
         id = String.to_atom("dnode_#{env.id}")
         newDNode = %DNode{ id: id, parents: parents, runFct: runFct, initState: initState, isSink: isSink }
         env = %{ env | toRun: env.toRun ++ [id] }
@@ -113,12 +113,12 @@ defmodule Drepel.Env do
         end)
     end
 
-    def createNode(parents, fct, initState \\ &nilState/0) do
+    def createNode(parents, fct, initState \\ &nilState/1) do
         Agent.get_and_update(__MODULE__, &_addNode(&1, parents, fct, initState))
     end
 
     def createSink(parents, fct) do
-        Agent.get_and_update(__MODULE__, fn env -> _addNode(env, parents, fct,  &nilState/0, true) end)
+        Agent.get_and_update(__MODULE__, fn env -> _addNode(env, parents, fct,  &nilState/1, true) end)
         :ok
     end
 
@@ -129,15 +129,15 @@ defmodule Drepel.Env do
         onScheduled: &__MODULE__._arity2ErrWrapper(&1)
     }
 
-    def nilState do
-        fn -> nil end
+    def nilState(_nod) do
+        nil
     end
     
     @doc """ 
         Mid node is can hook on "completed" or "error" event. If not the
         signal will be propagated to the children of this node.
         """
-    def createMidNode(parents, fct, initState \\ &nilState/0) do
+    def createMidNode(parents, fct, initState \\ &nilState/1) do
         case fct do
             %{} -> createNode(parents, Enum.reduce(fct, %{}, fn {k, v}, acc -> Map.put(acc, k, Map.get(@errWrapper, k).(v)) end), initState)
             _ -> createNode(parents, %{onNext: __MODULE__._arity3ErrWrapper(fct)}, initState)
