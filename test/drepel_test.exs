@@ -428,6 +428,70 @@ defmodule DrepelTest do
         assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
     end
 
+    test "every" do
+        range(1..5)
+        |> every(fn el -> el<10 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, true}, {:compl, nil}]
+    end
+
+    test "amb" do
+        amb([from([1,2,3]), from([4,5,6]) |> delay(50), from([7,8,9]) |> delay(100)])
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+    end
+
+    test "contains_1" do
+        range(1..10)
+        |> contains(8)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, true}, {:compl, nil}]
+    end
+
+    test "contains_2" do
+        range(1..10)
+        |> contains(30)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, false}, {:compl, nil}]
+    end
+
+    test "contains_3" do
+        Drepel.throw("err")
+        |> contains(8)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, false}, {:err, "err"}]
+    end
+
+    test "contains_4" do
+        from([1,2,2,3])
+        |> contains(2)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, true}, {:compl, nil}]
+    end
+
+    test "defaultIfEmpty_1" do
+        range(1..2)
+        |> defaultIfEmpty(42)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+    end
+
+    test "defaultIfEmpty_2" do
+        empty()
+        |> delay(100)
+        |> defaultIfEmpty(42)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 42}, {:compl, nil}]
+    end
+
     test "max" do
         from([1, 2, 3])
         |> max()
