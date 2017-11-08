@@ -690,6 +690,22 @@ defmodule DrepelTest do
         compls = Enum.filter(res, fn {tag, _val} -> tag == :compl end)
         assert length(compls)==3
     end
+
+    test "toArray" do
+        range(1..3)
+        |> toArray()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, [1,2,3]}, {:compl, nil}]
+    end
+
+    test "toMap" do
+        range(1..3)
+        |> toMap(fn el -> el+1 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, %{ 2 => 1, 3 => 2, 4 => 3 }}, {:compl, nil}]
+    end
     
 
 end

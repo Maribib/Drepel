@@ -1277,6 +1277,40 @@ defmodule Drepel do
         nil
     end
 
+    def toArray(%MockDNode{id: id}) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val ->
+                %{ nod | state: nod.state ++ [val] }
+            end,
+            onCompleted: fn nod, _ ->
+                onNext(nod, nod.state)
+                onCompleted(nod)
+            end,
+            onError: fn nod, _, err ->
+                onNext(nod, nod.state)
+                onError(nod, err)
+            end
+        }, fn _ -> [] end)
+    end
+
+    def defaultToMapFct(el), do: el
+
+    def toMap(%MockDNode{id: id}, keyFct \\ &defaultToMapFct/1) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val ->
+                %{ nod | state: Map.put(nod.state, keyFct.(val), val) }
+            end,
+            onCompleted: fn nod, _ ->
+                onNext(nod, nod.state)
+                onCompleted(nod)
+            end,
+            onError: fn nod, _, err ->
+                onNext(nod, nod.state)
+                onError(nod, err)
+            end
+        }, fn _ -> %{} end)
+    end
+
     # SINK NODES
 
     def subscribe(%MockDNode{id: id}, nextFct, errFct \\ &Drepel.doNothing/1, complFct \\ &Drepel.doNothing/0) do
