@@ -27,10 +27,10 @@ defmodule DrepelTest do
     end
 
     test "create 1source-1sub" do
-        create(fn obs ->
-            onNext(obs, 42)
-            onNext(obs, 41)
-            onCompleted(obs)
+        create(fn nod ->
+            onNext(nod, 42)
+            onNext(nod, 41)
+            onCompleted(nod)
         end)
         |> collector
         Drepel.run()
@@ -50,10 +50,10 @@ defmodule DrepelTest do
             end ]
         end
 
-        n = create(fn obs ->
-            onNext(obs, 42)
-            onNext(obs, 41)
-            onCompleted(obs)
+        n = create(fn nod ->
+            onNext(nod, 42)
+            onNext(nod, 41)
+            onCompleted(nod)
         end)
         apply(&subscribe/4, [n] ++ subFct.(:c1))
         apply(&subscribe/4, [n] ++ subFct.(:c2))
@@ -412,6 +412,54 @@ defmodule DrepelTest do
         assert collected()==[{:next, "1A"}, {:next, "2B"}, {:next, "3C"}, {:next, "4D"}, {:compl, nil}]
     end
 
+    test "catch_1" do
+        create(fn nod ->
+            onNext(nod, 42)
+            onError(nod, "err")
+        end)
+        |> dcatch(fn -> 
+            just(3) 
+        end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 42}, {:next, 3}, {:compl, nil}]
+    end
+
+    test "catch_2" do
+        create(fn nod ->
+            onNext(nod, 42)
+            onError(nod, "err")
+        end)
+        |> dcatch(fn ->
+            Drepel.throw("err2")
+        end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 42}, {:err, "err2"}]
+    end
+
+    test "retry_1" do
+        Agent.start_link(fn -> [{&onNext/2, [42]}, {&onError/2, ["err"]}, {&onNext/2, [42]}, {&onCompleted/1, []}, ] end, name: :retry)
+        create(fn nod ->
+            actions = Agent.get_and_update(:retry, fn state ->
+                { Enum.slice(state, 0..1), Enum.slice(state, 2..length(state)) }
+            end)
+            Enum.map(actions, fn {fct, args} -> apply(fct, [nod]++args) end)
+        end)
+        |> retry()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 42}, {:next, 42}, {:compl, nil}]
+    end
+
+    test "retry_2" do
+        Drepel.throw("err")
+        |> retry(3)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:err, "err"}]
+    end
+
     test "combineLatest" do
         combineLatest(interval(50) |> delay(25), interval(50), fn v1, v2 -> "#{v1} #{v2}" end)
         |> take(7)
@@ -545,12 +593,20 @@ defmodule DrepelTest do
         assert collected()==[{:compl, nil}]
     end
 
-    test "takeWhile" do
+    test "takeWhile_1" do
         range(1..5)
         |> takeWhile(fn el -> el != 3 end)
         |> collector
         Drepel.run()
         assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+    end
+
+    test "takeWhile_2" do
+        empty()
+        |> takeWhile(fn el -> el != 3 end)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:compl, nil}]
     end
 
     test "max" do

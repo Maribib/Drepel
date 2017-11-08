@@ -658,6 +658,58 @@ defmodule Drepel do
         zip([dnode1, dnode2], zipFct)
     end
 
+    def dcatch(%MockDNode{id: id}, fct) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, sender, val ->
+                if (nod.state and sender==id) or (!nod.state and sender != id) do
+                    onNext(nod, val)
+                end
+                nod
+            end,
+            onError: fn nod, sender, err ->
+                if sender==id do
+                    subObs = fct.()
+                    case subObs do
+                        %MockDNode{id: subId} ->
+                            Drepel.Env.addTmpChild(subId, nod.id)
+                            Drepel.Env.runWithAncestors(subId)
+                            %{ nod | parents: nod.parents ++ [subId], state: false }
+                        _ -> 
+                            onError(nod, "Catch argument must be a function that returns a node.")
+                            nod
+                    end 
+                else
+                    onError(nod, err)
+                    nod
+                end
+            end
+        }, fn _ -> true end)
+    end
+
+    def retry(%MockDNode{id: id}, number \\ :inf) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val ->
+                onNext(nod, val)
+                nod
+            end,
+            onError: fn nod, sender, err ->
+                if nod.state==:inf or nod.state>0 do
+                    Drepel.Env.restartWithAncestors(sender)
+                    if nod.state != :inf do
+                        %{ nod | state: nod.state-1 }
+                    else
+                        nod
+                    end
+                else
+                    if nod.state != :inf do
+                        onError(nod, err)
+                    end
+                    nod
+                end
+            end
+        }, fn _ -> number end)
+    end
+
     def combineLatest(dnodes, combineFct) when is_list(dnodes) do
         Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
             onNext: fn nod, sender, val ->

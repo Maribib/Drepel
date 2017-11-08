@@ -7,11 +7,12 @@ defmodule Drepel.Supervisor do
 
     def init(:ok) do
         children = [
-            Supervisor.Spec.supervisor(DNode.Supervisor, [[name: DNode.Supervisor]]),
             Supervisor.Spec.worker(Manager, [[], [name: Manager]]),
             Supervisor.Spec.worker(Schedule, [[], [name: Schedule]]),
-            Supervisor.Spec.worker(Scheduler, [[], [name: Scheduler]])
+            Supervisor.Spec.worker(Scheduler, [[], [name: Scheduler]]),
+            Supervisor.Spec.supervisor(DNode.Supervisor, [[name: DNode.Supervisor]])
         ]
         Supervisor.init(children, strategy: :one_for_one)
     end
+
 end

@@ -101,6 +101,16 @@ defmodule Drepel.Env do
         end)
     end
 
+    def restartWithAncestors(id) do 
+        Agent.get(__MODULE__, fn env ->
+            ancestors = MapSet.to_list(getAllAncestor(env, id))
+            Enum.map(ancestors, &Supervisor.terminate_child(DNode.Supervisor, &1))
+            startAllMidNodes(env, ancestors -- env.children)
+            startAllSources(env, env.children -- ( env.children -- ancestors ))
+            :ok
+        end)
+    end
+
     def updateAllChildrenFromNode(nodes, obs) do
         Agent.get(__MODULE__, fn env -> 
             parents = Enum.reduce(nodes, MapSet.new(), &MapSet.union(&2, MapSet.new(Map.get(env.nodes, &1).parents)))
