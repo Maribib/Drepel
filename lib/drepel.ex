@@ -334,6 +334,78 @@ defmodule Drepel do
         }, fn _ -> %{ buff: [], eid: 0 } end)
     end
 
+    def tap(%MockDNode{id: id}, onNextFct, onErrorFct, onCompletedFct) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val ->
+                onNextFct.(val)
+                onNext(nod, val)
+                nod
+            end,
+            onCompleted: fn nod, _ ->
+                onCompletedFct.()
+                onCompleted(nod)
+                nod
+            end,
+            onError: fn nod, _, err ->
+                onErrorFct.(err)
+                onError(nod, err)
+                nod
+            end
+        })
+    end
+
+    def tapOnNext(%MockDNode{}=aDNode, onNextFct) do
+        tap(aDNode, onNextFct, fn _err -> nil end, fn -> nil end)
+    end
+    def tapOnError(%MockDNode{}=aDNode, onErrorFct) do
+        tap(aDNode, fn _val -> nil end, onErrorFct, fn -> nil end)
+    end
+    def tapOnCompleted(%MockDNode{}=aDNode, onCompletedFct) do
+        tap(aDNode, fn _val -> nil end, fn _err -> nil end, onCompletedFct)
+    end
+
+    def materialize(%MockDNode{id: id}) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val ->
+                onNext(nod, {&Drepel.onNext/2, val})
+                nod
+            end,
+            onCompleted: fn nod, _ ->
+                onNext(nod, {&Drepel.onCompleted/1, nil})
+                onCompleted(nod)
+                nod
+            end,
+            onError: fn nod, _, err ->
+                onNext(nod, {&Drepel.onError/2, err})
+                onCompleted(nod)
+                nod
+            end
+        })
+    end
+
+    def dematerialize(%MockDNode{id: id}) do
+        onNextFct = &Drepel.onNext/2
+        onErrorFct = &Drepel.onError/2
+        onCompletedFct = &Drepel.onCompleted/1
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val ->
+                case val do
+                    {^onNextFct, val} -> onNext(nod, val)
+                    {^onErrorFct, err} -> onError(nod, err)
+                    {^onCompletedFct, nil} -> onCompleted(nod)
+                    _ -> onError(nod, "Elements must be be valid materialized value.")
+                end
+                nod
+            end,
+            onCompleted: fn nod, _ ->
+                nod
+            end,
+            onError: fn nod, _, _err ->
+                nod
+            end
+        })
+    end
+
     def reduce(%MockDNode{id: id}, fct, init \\ 0) do
         Drepel.Env.createMidNode([id], %{
             onNext: fn nod, _, val ->  %{ nod | state: fct.(nod.state, val) } end,

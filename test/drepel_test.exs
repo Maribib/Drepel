@@ -193,6 +193,63 @@ defmodule DrepelTest do
         assert collected()==[{:next, 10}, {:compl, nil}]
     end
 
+    test "tap_1" do
+        Agent.start_link(fn -> [] end, name: :tap)
+        range(1..2)
+        |> tap(fn val -> Agent.update(:tap, &(&1 ++ [val])) end, fn err -> Agent.update(:tap, &(&1 ++ [err])) end, fn -> Agent.update(:tap, &(&1 ++ [:compl])) end)
+        |> collector
+        Drepel.run()
+        assert Agent.get(:tap, &(&1))==[1, 2, :compl]
+        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+        Agent.stop(:tap)
+    end
+
+    test "tap_2" do
+        Agent.start_link(fn -> [] end, name: :tap)
+        range(1..2)
+        |> tapOnNext(fn val -> Agent.update(:tap, &(&1 ++ [val])) end)
+        |> tapOnError(fn err -> Agent.update(:tap, &(&1 ++ [err])) end)
+        |> tapOnCompleted(fn -> Agent.update(:tap, &(&1 ++ [:compl])) end)
+        |> collector
+        Drepel.run()
+        assert Agent.get(:tap, &(&1))==[1, 2, :compl]
+        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+        Agent.stop(:tap)
+    end
+
+    test "materialize" do
+        just(42)
+        |> materialize()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, {&onNext/2, 42}}, {:next, {&onCompleted/1, nil}}, {:compl, nil}]
+    end
+
+    test "dematerialize_1" do
+        from([{&onNext/2, 42}, {&onCompleted/1, nil}])
+        |> dematerialize()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 42}, {:compl, nil}]
+    end
+
+    test "dematerialize_2" do
+        just(42)
+        |> dematerialize()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:err, "Elements must be be valid materialized value."}]
+    end
+
+    test "materialize/dematerialize" do
+        range(1..3)
+        |> materialize()
+        |> dematerialize()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}, ]
+    end
+
     test "reduce" do
         from([1, 2, 3, 4, 5])
         |> reduce(fn v, acc -> v+acc end)
@@ -450,6 +507,7 @@ defmodule DrepelTest do
         |> collector
         Drepel.run()
         assert collected()==[{:next, 42}, {:next, 42}, {:compl, nil}]
+        Agent.stop(:retry)
     end
 
     test "retry_2" do
@@ -707,6 +765,5 @@ defmodule DrepelTest do
         assert collected()==[{:next, %{ 2 => 1, 3 => 2, 4 => 3 }}, {:compl, nil}]
     end
     
-
 end
  
