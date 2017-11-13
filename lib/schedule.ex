@@ -63,7 +63,7 @@ defmodule Schedule do
 
     def _spawnOne(schedule, event, now) do
         if Timex.after?(now, event.time) do # check if time to spawn
-            DNode.onScheduled(event.id, event.name)
+            DNode.onScheduled(event.id, event.name, event.time)
             schedule = RedBlackTree.delete(schedule, event)
             if !is_nil(event.onRun) do # check if rescheduling rule
                 newEvent = event.onRun.(event)

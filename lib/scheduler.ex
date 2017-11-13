@@ -7,8 +7,8 @@ defmodule Scheduler do
         res
     end
 
-    def schedule(%DNode{id: id}, time, name \\ nil, onRun \\ nil, eid \\ nil) do # online scheduling
-        send(__MODULE__, Schedule.shiftMilisec(Timex.now, %Event{id: id, time: time, name: name, onRun: onRun, eid: eid}))
+    def schedule(%DNode{id: id}, now, time, name \\ nil, onRun \\ nil, eid \\ nil) do # online scheduling
+        send(__MODULE__, Schedule.shiftMilisec(now, %Event{id: id, time: time, name: name, onRun: onRun, eid: eid}))
     end
 
     def run do

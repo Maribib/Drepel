@@ -17,10 +17,10 @@ defmodule Drepel do
     use Agent
     use Task
 
-    defmacro __using__(_) do 
+    defmacro __using__(args) do 
         quote do
             import unquote(__MODULE__)
-            Env.new()
+            Env.new(unquote args)
             EventCollector.start_link()
         end
     end
@@ -45,26 +45,87 @@ defmodule Drepel do
         end 
     end
 
-    def onNext(%DNode{id: id, children: children}, value) do 
-        Enum.map(children, &DNode.onNext(&1, id, value))
+    def onNext(%DNode{id: sender, children: children, timestamp: timestamp}, value) do 
+        Enum.map(children, &DNode.onNext(&1, sender, value, timestamp))
     end
 
-    def onNext(%DNode{id: id}, children, value) do
-        Enum.map(children, &DNode.onNext(&1, id, value))
+    def onNext(%DNode{id: sender, timestamp: timestamp}, children, value) do
+        Enum.map(children, &DNode.onNext(&1, sender, value, timestamp))
     end
 
-    def onCompleted(%DNode{id: id, children: children}) do
-        Enum.map(children, &DNode.onCompleted(&1, id))
+    def onCompleted(%DNode{id: sender, children: children, timestamp: timestamp}) do
+        Enum.map(children, &DNode.onCompleted(&1, sender, timestamp))
         Manager.normalExit(self())
     end
 
-    def onError(%DNode{id: id, children: children}, err) do
-        Enum.map(children, &DNode.onError(&1, id, err))
+    def onError(%DNode{id: sender, children: children, timestamp: timestamp}, err) do
+        Enum.map(children, &DNode.onError(&1, sender, err, timestamp))
         Manager.normalExit(self())
+    end
+
+    def onNextAs(%DNode{children: children}, value, sender, timestamp) do
+        Enum.map(children, &DNode.onNext(&1, sender, value, timestamp))
+    end
+
+    def onCompletedAs(%DNode{children: children}, sender, timestamp) do
+        Enum.map(children, &DNode.onCompleted(&1, sender, timestamp))
+    end
+
+    def onErrorAs(%DNode{children: children}, err, sender, timestamp) do
+        Enum.map(children, &DNode.onError(&1, sender, err, timestamp))
+    end
+
+    def ordered(%MockDNode{id: id}) do
+        Drepel.Env.createNode([id], %{
+            onNext: fn nod, _, _val, timestamp ->
+                case nod.state do
+                    %Sentinel{} -> %{ nod | state: timestamp }
+                    _ -> 
+                        isOrdered = Timex.diff(timestamp, nod.state)>=0
+                        onNext(nod, isOrdered)
+                        if isOrdered do
+                            %{ nod | state: timestamp }
+                        else
+                            nod
+                        end
+                end
+            end,
+            onCompleted: fn nod, _, timestamp ->
+                case nod.state do
+                    %Sentinel{} -> %{ nod | state: timestamp }
+                    _ -> 
+                        isOrdered = Timex.diff(timestamp, nod.state)>=0
+                        onNext(nod, isOrdered)
+                        onCompleted(nod)
+                        if isOrdered do
+                            %{ nod | state: timestamp }
+                        else
+                            nod
+                        end
+                end
+            end,
+            onError: fn nod, _, err, timestamp ->
+                case nod.state do
+                    %Sentinel{} -> %{ nod | state: timestamp }
+                    _ -> 
+                        isOrdered = Timex.diff(timestamp, nod.state)>=0
+                        onNext(nod, isOrdered)
+                        onError(nod, err)
+                        if isOrdered do
+                            %{ nod | state: timestamp }
+                        else
+                            nod
+                        end
+                end
+            end
+        }, fn _ -> %Sentinel{} end)
     end
 
     def create(fct) do
-        Drepel.Env.createNode([:dnode_0], fct)
+        Drepel.Env.createNode([:dnode_0], fn nod ->
+            fct.(nod)
+            nod
+        end)
     end
 
     def empty do
@@ -125,9 +186,9 @@ defmodule Drepel do
     end
 
     def timer(offset, val \\ 0) do
-        res = create(%{ 
+        res = Drepel.Env.createNode([:dnode_0], %{ 
             onNext: fn nod -> nod end,
-            onScheduled: fn nod, _name ->
+            onScheduled: fn nod, _, _ ->
                 onNext(nod, val)
                 onCompleted(nod)
                 nod
@@ -140,7 +201,7 @@ defmodule Drepel do
     def interval(duration) do
         res = Drepel.Env.createNode([:dnode_0], %{
             onNext: fn nod -> nod end,
-            onScheduled: fn nod, _name ->
+            onScheduled: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 %{ nod | state: nod.state+1 }
             end
@@ -154,7 +215,7 @@ defmodule Drepel do
     # MID NODES
 
     def map(%MockDNode{id: id}, fct) do
-        Drepel.Env.createMidNode([id], fn nod, _, val ->
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->
             onNext(nod, fct.(val))
             nod
         end)
@@ -175,7 +236,7 @@ defmodule Drepel do
 
     def flatmap(%MockDNode{id: id}, fct) do    
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 if sender==id do
                     nod = if length(nod.state.buff)==0 do
                         _flatmap(nod, fct, val, nod.id)
@@ -188,7 +249,7 @@ defmodule Drepel do
                     nod
                 end
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                 if sender==id do
                     case length(nod.state.buff) do
                         0 ->
@@ -215,20 +276,20 @@ defmodule Drepel do
     end
 
     def scan(%MockDNode{id: id}, fct, init \\ 0) do
-        Drepel.Env.createMidNode([id], fn nod, _, val ->
-            newState = fct.(nod.state, val)
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->
+            newState = fct.(val, nod.state)
             onNext(nod, newState)
             %{ nod | state: newState }
         end, fn _ -> init end)
     end
 
     def _buffer(id, boundId, init, %{onNextVal: nextValFct, onNextBound: nextBoundFct}) do
-        Drepel.Env.createMidNode([id, boundId], fn nod, sender, val ->
+        Drepel.Env.createMidNode([id, boundId], fn nod, sender, val, _ ->
             case sender do
                 ^id -> nextValFct.(nod, val)
                 ^boundId -> nextBoundFct.(nod, val)
             end
-        end, fn _ -> init end)
+        end, fn _ -> init end, reorder: true)
     end
 
     @doc """
@@ -292,7 +353,7 @@ defmodule Drepel do
     @initBuffWithCountState %{length: 0, buff: []}
 
     def bufferWithCount(%MockDNode{id: id}, count) do 
-        Drepel.Env.createMidNode([id], fn nod, _, val ->
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->
             case nod.state.length+1 do
                 ^count -> 
                     onNext(nod, nod.state.buff ++ [val])
@@ -304,19 +365,19 @@ defmodule Drepel do
 
     def delay(%MockDNode{id: id}, timespan) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
-                Scheduler.schedule(nod, timespan, :onNext, nil, nod.state.eid)
+            onNext: fn nod, _, val, timestamp ->
+                Scheduler.schedule(nod, timestamp != 0 && timestamp || Timex.now, timespan, :onNext, nil, nod.state.eid)
                 %{ nod | state: %{ nod.state | buff: nod.state.buff ++ [val], eid: nod.state.eid+1 } }
             end,
-            onCompleted: fn nod, _ ->
-                Scheduler.schedule(nod, timespan, :onCompleted, nil, nod.state.eid)
+            onCompleted: fn nod, _, timestamp ->
+                Scheduler.schedule(nod, timestamp != 0 && timestamp || Timex.now, timespan, :onCompleted, nil, nod.state.eid)
                 %{ nod | state: %{ nod.state | eid: nod.state.eid+1 } }
             end,
-            onError: fn nod, _, err ->
-                Scheduler.schedule(nod, timespan, :onError, nil, nod.state.eid)
+            onError: fn nod, _, err, timestamp ->
+                Scheduler.schedule(nod, timestamp != 0 && timestamp || Timex.now, timespan, :onError, nil, nod.state.eid)
                 %{ nod | state: %{ nod.state | buff: nod.state.buff ++ [err], eid: nod.state.eid+1 } }
             end,
-            onScheduled: fn nod, name ->
+            onScheduled: fn nod, name, _ ->
                 case name do
                     :onNext ->
                         [head | tail] = nod.state.buff
@@ -336,17 +397,17 @@ defmodule Drepel do
 
     def tap(%MockDNode{id: id}, onNextFct, onErrorFct, onCompletedFct) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 onNextFct.(val)
                 onNext(nod, val)
                 nod
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onCompletedFct.()
                 onCompleted(nod)
                 nod
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                 onErrorFct.(err)
                 onError(nod, err)
                 nod
@@ -366,16 +427,16 @@ defmodule Drepel do
 
     def materialize(%MockDNode{id: id}) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 onNext(nod, {&Drepel.onNext/2, val})
                 nod
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, {&Drepel.onCompleted/1, nil})
                 onCompleted(nod)
                 nod
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                 onNext(nod, {&Drepel.onError/2, err})
                 onCompleted(nod)
                 nod
@@ -388,7 +449,7 @@ defmodule Drepel do
         onErrorFct = &Drepel.onError/2
         onCompletedFct = &Drepel.onCompleted/1
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 case val do
                     {^onNextFct, val} -> onNext(nod, val)
                     {^onErrorFct, err} -> onError(nod, err)
@@ -397,19 +458,27 @@ defmodule Drepel do
                 end
                 nod
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 nod
             end,
-            onError: fn nod, _, _err ->
+            onError: fn nod, _, _err, _ ->
                 nod
             end
         })
     end
 
+    def timeInterval(%MockDNode{id: id}) do
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->
+            now = Timex.now()
+            onNext(nod, %{ interval: Timex.diff(now, nod.state)/1000, value: val})
+            %{ nod | state: now }
+        end, fn _ -> Timex.now end)
+    end
+
     def reduce(%MockDNode{id: id}, fct, init \\ 0) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->  %{ nod | state: fct.(nod.state, val) } end,
-            onCompleted: fn nod, _ ->
+            onNext: fn nod, _, val, _ ->  %{ nod | state: fct.(nod.state, val) } end,
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 onCompleted(nod)
                 nod
@@ -418,7 +487,7 @@ defmodule Drepel do
     end
 
     def skip(%MockDNode{id: id}, nb) when is_integer(nb) do
-        Drepel.Env.createMidNode([id], fn nod, _, val ->  
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->  
             if (nod.state>0) do
                 %{ nod | state: nod.state-1 }
             else
@@ -430,7 +499,7 @@ defmodule Drepel do
 
     def skipLast(%MockDNode{id: id}, nb) when is_integer(nb) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 if nod.state.size==nb do
                     [ head | tail ] = nod.state.buff
                     onNext(nod, head)
@@ -444,14 +513,14 @@ defmodule Drepel do
 
     def elementAt(%MockDNode{id: id}, pos) when is_integer(pos) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->  
+            onNext: fn nod, _, val, _ ->  
                 if nod.state==0 do
                     onNext(nod, val)
                     onCompleted(nod)
                 end
                 %{ nod | state: nod.state-1 }
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 if nod.state>=0 do
                     onError(nod, "Argument out of range")
                 end
@@ -463,7 +532,7 @@ defmodule Drepel do
     def _extractKey(v), do: v
 
     def distinct(%MockDNode{id: id}, extractKey \\ &_extractKey/1) do
-        Drepel.Env.createMidNode([id], fn nod, _, val ->  
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->  
             key = extractKey.(val)
             if (RedBlackTree.has_key?(nod.state, key)) do
                 nod
@@ -476,41 +545,43 @@ defmodule Drepel do
     end
 
     def ignoreElements(%MockDNode{id: id}) do
-        Drepel.Env.createMidNode([id], fn nod, _, _val ->  
+        Drepel.Env.createMidNode([id], fn nod, _, _val, _ ->  
             nod
         end)
     end
 
     def sample(%MockDNode{id: id}, timespan) when is_integer(timespan) do
-        res = Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
-                %{ nod | state: %{ nod.state | val: val } }
+        %MockDNode{id: samplerId} = interval(timespan)
+        Drepel.Env.createMidNode([id, samplerId], %{
+            onNext: fn nod, sender, val, _ ->
+                case sender do
+                    ^id -> %{ nod | state: %{ nod.state | val: val } }
+                    ^samplerId -> 
+                        if !nod.state.compl do
+                            case nod.state.val do
+                                %Sentinel{} -> nod
+                                _ ->
+                                    onNext(nod, nod.state.val)
+                                    %{ nod | state: %{ nod.state | val: %Sentinel{} } }
+                            end
+                        else
+                            nod
+                        end
+                end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onCompleted(nod)
                 %{ nod | state: %{ nod.state | compl: true } }
             end,
-            onScheduled: fn nod, _name ->
-                if !nod.state.compl do
-                    case nod.state.val do
-                        %Sentinel{} -> nod
-                        _ ->
-                            onNext(nod, nod.state.val)
-                            %{ nod | state: %{ nod.state | val: %Sentinel{} } }
-                    end
-                else
-                    nod
-                end
+            onError: fn nod, _, err, _ ->
+                onError(nod, err)
+                %{ nod | state: %{ nod.state | compl: true } }
             end
-        }, fn _ -> %{ val: %Sentinel{}, compl: false } end)
-        EventCollector.schedule(res, timespan, nil, fn event ->
-            %{ event | time: Timex.shift(event.time, microseconds: timespan*1000) } 
-        end)
-        res
+        }, fn _ -> %{ val: %Sentinel{}, compl: false } end, reorder: true)
     end
 
     def filter(%MockDNode{id: id}, condition) do
-        Drepel.Env.createMidNode([id], fn nod, _, val ->  
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->  
             if condition.(val) do
                 onNext(nod, val)
             end
@@ -524,7 +595,7 @@ defmodule Drepel do
 
     def first(%MockDNode{id: id}, condition \\ &_trueCond/1) do
         Drepel.Env.createMidNode([id], %{ 
-            onNext: fn nod, _, val ->  
+            onNext: fn nod, _, val, _ ->  
                 if nod.state and condition.(val) do
                     onNext(nod, val)
                     onCompleted(nod)
@@ -533,7 +604,7 @@ defmodule Drepel do
                     nod
                 end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 if nod.state do
                     onError(nod, "Any element match condition.")
                 end
@@ -544,14 +615,14 @@ defmodule Drepel do
 
     def last(%MockDNode{id: id}, condition \\ &_trueCond/1) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 if condition.(val) do
                     %{ nod | state: val }
                 else
                     nod
                 end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 case nod.state do
                     %Sentinel{} -> onError(nod, "Any element match condition.")
                     _ -> 
@@ -565,15 +636,15 @@ defmodule Drepel do
 
     def debounce(%MockDNode{id: id}, timespan) do
         Drepel.Env.createMidNode([id], %{ 
-            onNext: fn nod, _, val -> 
-                Scheduler.schedule(nod, timespan, :onNext, nil, nod.state.eid)
+            onNext: fn nod, _, val, timestamp -> 
+                Scheduler.schedule(nod, timestamp, timespan, :onNext, nil, nod.state.eid)
                 %{ nod | state: %{ nod.state | count: nod.state.count+1, val: val, eid: nod.state.eid+1 } }
             end,
-            onCompleted: fn nod, _ ->
-                Scheduler.schedule(nod, timespan, :onCompleted, nil, nod.state.eid)
+            onCompleted: fn nod, _, timestamp ->
+                Scheduler.schedule(nod, timestamp, timespan, :onCompleted, nil, nod.state.eid)
                 %{ nod | state: %{ nod.state | eid: nod.state.eid+1 } }
             end,
-            onScheduled: fn nod, name ->
+            onScheduled: fn nod, name, _ ->
                 case name do
                     :onNext ->
                         if nod.state.count==1 do
@@ -585,12 +656,12 @@ defmodule Drepel do
                         nod
                 end
             end
-        }, fn _ -> %{ val: %Sentinel{}, count: 0, eid: 0 } end)
+        }, fn _ -> %{ val: %Sentinel{}, count: 0, eid: 0 } end, reorder: true)
     end
 
     def take(%MockDNode{id: id}, nb) when is_integer(nb) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 if nod.state>0 do
                     onNext(nod, val)
                 end
@@ -599,7 +670,7 @@ defmodule Drepel do
                 end
                 %{ nod | state: nod.state-1 }
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 nod
             end
         }, fn _ -> nb end)  
@@ -607,7 +678,7 @@ defmodule Drepel do
 
     def takeLast(%MockDNode{id: id}, nb) when is_integer(nb) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 if nod.state.size==nb do
                     [_ | tail] = nod.state.buff
                     %{ nod | state: %{ nod.state | buff: tail ++ [val] } }
@@ -615,7 +686,7 @@ defmodule Drepel do
                     %{ nod | state: %{ nod.state | buff: nod.state.buff ++ [val], size: nod.state.size+1 } }
                 end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 Enum.map(nod.state.buff, &onNext(nod, &1))
                 onCompleted(nod)
                 nod
@@ -625,11 +696,11 @@ defmodule Drepel do
 
     def merge(dnodes) when is_list(dnodes) do
         Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 onNext(nod, val)
                 nod
             end,
-            onCompleted: fn nod, sender ->
+        onCompleted: fn nod, sender, _ ->
                 compl = nod.state.compl ++ [sender]
                 if length(nod.parents -- compl)==0 do
                     if nod.state.errBuff == [] do
@@ -640,7 +711,7 @@ defmodule Drepel do
                 end
                 %{ nod | state: %{ nod.state | compl: compl } }
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 compl = nod.state.compl ++ [sender]
                 if length(nod.parents -- compl)==0 do
                     onError(nod, nod.state.errBuff ++ [err])
@@ -650,7 +721,7 @@ defmodule Drepel do
                     compl: compl} 
                 }
             end
-        }, fn _ -> %{ errBuff: [], compl: [] } end)
+        }, fn _ -> %{ errBuff: [], compl: [] } end, reorder: true)
     end
 
     def merge(%MockDNode{}=dnode1, %MockDNode{}=dnode2) do
@@ -659,7 +730,7 @@ defmodule Drepel do
 
     def zip(dnodes, zipFct) when is_list(dnodes) do
         Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 aQueue = Map.get(nod.state.buffs, sender)
                 isReady = :queue.len(aQueue)==0
                 nod = %{ nod | state: %{ nod.state | 
@@ -689,7 +760,7 @@ defmodule Drepel do
                     nod
                 end
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                 if !nod.state.compl do
                     if :queue.is_empty(Map.get(nod.state.buffs, sender)) do
                         onCompleted(nod)
@@ -701,7 +772,7 @@ defmodule Drepel do
                     nod                   
                 end
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 if !nod.state.compl do
                     if :queue.is_empty(Map.get(nod.state.buffs, sender)) do
                         onError(nod, nod.state.errBuff ++ [err])
@@ -732,13 +803,13 @@ defmodule Drepel do
 
     def dcatch(%MockDNode{id: id}, fct) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 if (nod.state and sender==id) or (!nod.state and sender != id) do
                     onNext(nod, val)
                 end
                 nod
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 if sender==id do
                     subObs = fct.()
                     case subObs do
@@ -760,11 +831,11 @@ defmodule Drepel do
 
     def retry(%MockDNode{id: id}, number \\ :inf) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 onNext(nod, val)
                 nod
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 if nod.state==:inf or nod.state>0 do
                     Drepel.Env.restartWithAncestors(sender)
                     if nod.state != :inf do
@@ -784,7 +855,7 @@ defmodule Drepel do
 
     def combineLatest(dnodes, combineFct) when is_list(dnodes) do
         Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 state = %{ nod.state | 
                     vals: %{ nod.state.vals | sender => val }, 
                     ready: nod.state.ready-(Map.get(nod.state.vals, sender)==%Sentinel{} && 1 || 0) 
@@ -794,7 +865,7 @@ defmodule Drepel do
                 end
                 %{ nod | state: state }
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                 if Map.get(nod.state.compls, sender) do
                     nod
                 else
@@ -811,7 +882,7 @@ defmodule Drepel do
                     } }
                 end
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 if Map.get(nod.state.compls, sender) do
                     nod
                 else
@@ -831,7 +902,7 @@ defmodule Drepel do
             compl: length(nod.parents), 
             vals: Enum.reduce(nod.parents, %{}, fn id, acc -> Map.put(acc, id, %Sentinel{}) end),
             compls: Enum.reduce(nod.parents, %{}, fn id, acc -> Map.put(acc, id, false) end)
-        } end)
+        } end, reorder: true)
     end
 
     def combineLatest(%MockDNode{}=dnode1, %MockDNode{}=dnode2, combineFct) do
@@ -841,7 +912,7 @@ defmodule Drepel do
     def startWith(%MockDNode{id: id}, v1, v2 \\ nil, v3 \\ nil, v4 \\ nil, v5 \\ nil, v6 \\ nil, v7 \\ nil, v8 \\ nil, v9 \\ nil) do
         values = Enum.to_list(binding() |> tl() |> Stream.filter(fn {_, b} -> !is_nil(b) end) |> Stream.map(fn {_, b} -> b end))
         res = Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val -> 
+            onNext: fn nod, _, val, _ -> 
                 if nod.state.done do
                     onNext(nod, val)
                     nod
@@ -849,17 +920,17 @@ defmodule Drepel do
                     update_in(nod.state.values, &(&1 ++ [val]))
                 end
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                 Enum.map(nod.state.values, &onNext(nod, &1))
                 onError(nod, err)
                 %{ nod | state: %{ nod.state | done: true, values: [] } }
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 Enum.map(nod.state.values, &onNext(nod, &1))
                 onCompleted(nod)
                 %{ nod | state: %{ nod.state | done: true, values: [] } }
             end,
-            onScheduled: fn nod, _ -> 
+            onScheduled: fn nod, _, _ -> 
                 Enum.map(nod.state.values, &onNext(nod, &1))
                 %{ nod | state: %{ nod.state | done: true, values: [] } }
             end
@@ -870,15 +941,15 @@ defmodule Drepel do
 
     def every(%MockDNode{id: id}, condition) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val -> 
+            onNext: fn nod, _, val, _ -> 
                 %{ nod | state: nod.state && condition.(val) }
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                onNext(nod, nod.state)
                onError(nod, err)
                nod
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 onCompleted(nod)
                 nod
@@ -888,7 +959,7 @@ defmodule Drepel do
 
     def amb(dnodes) when is_list(dnodes) do
         Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
-            onNext: fn nod, sender, val -> 
+            onNext: fn nod, sender, val, _ -> 
                 case nod.state do
                     %Sentinel{} -> 
                         onNext(nod, val)
@@ -900,7 +971,7 @@ defmodule Drepel do
                         nod
                 end
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 case nod.state do
                     %Sentinel{} -> 
                         onError(nod, err)
@@ -912,7 +983,7 @@ defmodule Drepel do
                         nod
                 end
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                 case nod.state do
                     %Sentinel{} -> 
                         onCompleted(nod)
@@ -924,7 +995,7 @@ defmodule Drepel do
                         nod
                 end
             end
-        }, fn _ -> %Sentinel{} end)
+        }, fn _ -> %Sentinel{} end, reorder: true)
     end
 
     def amb(%MockDNode{}=dnode1, %MockDNode{}=dnode2) do
@@ -933,7 +1004,7 @@ defmodule Drepel do
 
     def contains(%MockDNode{id: id}, anElement) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 if !nod.state and val==anElement do
                     onNext(nod, true)
                     onCompleted(nod)
@@ -942,7 +1013,7 @@ defmodule Drepel do
                     nod
                 end
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                 if !nod.state do
                     onNext(nod, false)
                     onError(nod, err)
@@ -951,7 +1022,7 @@ defmodule Drepel do
                     nod
                 end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 if !nod.state do
                     onNext(nod, false)
                     onCompleted(nod)
@@ -965,18 +1036,18 @@ defmodule Drepel do
 
     def defaultIfEmpty(%MockDNode{id: id}, defaultEl) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 onNext(nod, val)
                 %{ nod | state: true } 
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                 if !nod.state do
                     onNext(nod, defaultEl)
                 end
                 onError(nod, err)
                 nod
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 if !nod.state do
                     onNext(nod, defaultEl)
                 end
@@ -988,7 +1059,7 @@ defmodule Drepel do
 
     def sequenceEqual(dnodes) when is_list(dnodes) do
         Drepel.Env.createMidNode(Enum.map(dnodes, fn %MockDNode{id: id} -> id end), %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 if nod.state.isEqual do
                     index = Map.get(nod.state.indexes, sender)
                     if index<nod.state.length do
@@ -1025,7 +1096,7 @@ defmodule Drepel do
                     nod
                 end
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 if !Map.get(nod.state.compls, sender) do
                     if nod.state.compl+1==nod.state.nbParents do
                         onNext(nod, nod.state.isEqual and nod.state.length==0)
@@ -1040,7 +1111,7 @@ defmodule Drepel do
                     nod
                 end
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                  if !Map.get(nod.state.compls, sender) do
                     if nod.state.compl+1==nod.state.nbParents do
                         onNext(nod, nod.state.isEqual and nod.state.length==0)
@@ -1077,7 +1148,7 @@ defmodule Drepel do
 
     def skipUntil(%MockDNode{id: id1}, %MockDNode{id: id2}) do
         Drepel.Env.createMidNode([id1, id2], %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 case sender do
                     ^id1 ->
                         if nod.state do
@@ -1087,23 +1158,23 @@ defmodule Drepel do
                     ^id2 -> %{ nod | state: true }
                 end
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                 if sender==id1 do
                     onCompleted(nod)
                 end
                 nod
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 if sender==id1 do
                     onError(nod, err)
                 end
                 nod
             end
-        }, fn _ -> false end)  
+        }, fn _ -> false end, reorder: true)  
     end
 
     def skipWhile(%MockDNode{id: id}, skipFct) do
-        Drepel.Env.createMidNode([id], fn nod, _, val ->
+        Drepel.Env.createMidNode([id], fn nod, _, val, _ ->
             if nod.state do
                 onNext(nod, val)
                 nod
@@ -1120,7 +1191,7 @@ defmodule Drepel do
 
     def takeUntil(%MockDNode{id: id1}, %MockDNode{id: id2}) do
         Drepel.Env.createMidNode([id1, id2], %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 case sender do
                     ^id1 ->
                         if nod.state do
@@ -1132,24 +1203,24 @@ defmodule Drepel do
                         %{ nod | state: false }
                 end
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                 if nod.state and sender==id1 do
                     onCompleted(nod)
                 end
                 nod
             end,
-            onError: fn nod, sender, err ->
+            onError: fn nod, sender, err, _ ->
                 if nod.state and sender==id1 do
                     onError(nod, err)
                 end
                 nod
             end
-        }, fn _ -> true end)
+        }, fn _ -> true end, reorder: true)
     end
 
     def takeWhile(%MockDNode{id: id}, takeFct) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 if nod.state do
                     if !takeFct.(val) do
                         onCompleted(nod)
@@ -1162,14 +1233,14 @@ defmodule Drepel do
                     nod
                 end
             end, 
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 if nod.state do
                     onCompleted(nod)
                     %{ nod | state: false }
                 else 
                     nod
                 end
-            end, onError: fn nod, _, err ->
+            end, onError: fn nod, _, err, _ ->
                 if nod.state do
                     onError(nod, err)
                     %{ nod | state: false }
@@ -1182,7 +1253,7 @@ defmodule Drepel do
 
     def _extremum(id, comparator) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 case nod.state do
                     %Sentinel{} -> %{ nod | state: val }
                     _ -> 
@@ -1193,7 +1264,7 @@ defmodule Drepel do
                         end
                 end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 onCompleted(nod)
                 nod
@@ -1211,7 +1282,7 @@ defmodule Drepel do
 
     def _extremumBy(id, extractor, comparator) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 key = extractor.(val)
                 case nod.state do
                     %Sentinel{} -> %{ nod | state: %{ key: key, values: [val] } }
@@ -1227,7 +1298,7 @@ defmodule Drepel do
                         end
                 end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state.values)
                 onCompleted(nod)
                 nod
@@ -1245,14 +1316,14 @@ defmodule Drepel do
 
     def average(%MockDNode{id: id}) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 %{ nod | state: %{ nod.state | count: nod.state.count+1, sum: nod.state.sum+val } }
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 if nod.state.count==0 do
                     onNext(nod, 0)
                 else
-                    onNext(nod, div(nod.state.sum, nod.state.count))
+                    onNext(nod, nod.state.sum/nod.state.count)
                 end
                 onCompleted(nod)
                 nod
@@ -1262,14 +1333,14 @@ defmodule Drepel do
 
     def count(%MockDNode{id: id}, condition) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 if condition.(val) do
                     %{ nod | state: nod.state+1 }
                 else
                     nod
                 end
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 onCompleted(nod)
                 nod
@@ -1279,10 +1350,10 @@ defmodule Drepel do
 
     def sum(%MockDNode{id: id}) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 %{ nod | state: nod.state+val }
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 onCompleted(nod)
                 nod
@@ -1292,7 +1363,7 @@ defmodule Drepel do
 
     def concat(%MockDNode{id: id1}, %MockDNode{id: id2}) do
         Drepel.Env.createMidNode([id1, id2], %{
-            onNext: fn nod, sender, val ->
+            onNext: fn nod, sender, val, _ ->
                 if nod.state.done do
                     onNext(nod, val)
                     nod
@@ -1305,7 +1376,7 @@ defmodule Drepel do
                     end
                 end
             end,
-            onCompleted: fn nod, sender ->
+            onCompleted: fn nod, sender, _ ->
                 case sender do
                     ^id1 -> 
                         Enum.map(nod.state.buff, &onNext(nod, &1))
@@ -1319,7 +1390,7 @@ defmodule Drepel do
     end
 
     def groupBy(%MockDNode{id: id}, extractKey, extractVal \\ nil) do
-        res = Drepel.Env.createMidNode([id], fn nod, _, val ->
+        res = Drepel.Env.createMidNode([id], fn nod, _, val, _ ->
             key = extractKey.(val)
             case extractVal do
                 nil -> onNext(nod, {key, key})
@@ -1331,7 +1402,7 @@ defmodule Drepel do
     end
 
     def subscribe(%MockGroup{id: id}, fct) do
-        Drepel.Env.createMidNode([id], fn nod, _, {key, val} -> 
+        Drepel.Env.createMidNode([id], fn nod, _, {key, val}, _ -> 
             if Map.has_key?(nod.state, key) do
                 onNext(nod, Map.get(nod.state, key), val)
                 nod
@@ -1351,16 +1422,18 @@ defmodule Drepel do
 
     def toArray(%MockDNode{id: id}) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 %{ nod | state: nod.state ++ [val] }
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 onCompleted(nod)
+                nod
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                 onNext(nod, nod.state)
                 onError(nod, err)
+                nod
             end
         }, fn _ -> [] end)
     end
@@ -1369,16 +1442,18 @@ defmodule Drepel do
 
     def toMap(%MockDNode{id: id}, keyFct \\ &defaultToMapFct/1) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val ->
+            onNext: fn nod, _, val, _ ->
                 %{ nod | state: Map.put(nod.state, keyFct.(val), val) }
             end,
-            onCompleted: fn nod, _ ->
+            onCompleted: fn nod, _, _ ->
                 onNext(nod, nod.state)
                 onCompleted(nod)
+                nod
             end,
-            onError: fn nod, _, err ->
+            onError: fn nod, _, err, _ ->
                 onNext(nod, nod.state)
                 onError(nod, err)
+                nod
             end
         }, fn _ -> %{} end)
     end
@@ -1388,6 +1463,19 @@ defmodule Drepel do
     def subscribe(%MockDNode{id: id}, nextFct, errFct \\ &Drepel.doNothing/1, complFct \\ &Drepel.doNothing/0) do
         Drepel.Env.createSink([id], %{ onNextSink: nextFct, onErrorSink: errFct, onCompletedSink: complFct })
     end
+
+    def subscribeOnNext(%MockDNode{}=dnode, nextFct) do
+        subscribe(dnode, nextFct)
+    end
+
+    def subscribeOnError(%MockDNode{}=dnode, errFct) do
+        subscribe(dnode, &Drepel.doNothing/1, errFct)
+    end
+
+    def subscribeOnCompleted(%MockDNode{}=dnode, complFct) do
+        subscribe(dnode, &Drepel.doNothing/1, &Drepel.doNothing/1, complFct)
+    end
+
 
 end
 

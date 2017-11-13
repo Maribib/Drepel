@@ -2,10 +2,13 @@ require DNode
 require MockDNode
 
 defmodule Drepel.Env do
-    defstruct [ id: 1, children: [], nodes: %{}, running: false, toRun: [] ]
+    defstruct [ id: 1, children: [], nodes: %{}, running: false,
+    toRun: [], orderSensitive: false ]
 
-    def new do
-        Agent.start_link(fn -> %__MODULE__{} end, name: __MODULE__)
+    def new(opts) do
+        Agent.start_link(fn -> %__MODULE__{ 
+            orderSensitive: :proplists.get_value(:orderSensitive, opts, false)
+        } end, name: __MODULE__)
     end
 
     def get do
@@ -30,16 +33,22 @@ defmodule Drepel.Env do
          end
     end
 
-    def _addNode(env, parents, runFct, initState \\ &nilState/1, isSink \\ false) do
+    def _addNode(env, parents, runFct, initState \\ &nilState/1, isSink \\ false, reorderer \\ nil) do
         id = String.to_atom("dnode_#{env.id}")
-        newDNode = %DNode{ id: id, parents: parents, runFct: runFct, initState: initState, isSink: isSink }
+        newDNode = %DNode{ 
+            id: id, parents: parents, runFct: runFct, 
+            initState: initState, isSink: isSink, reorderer: reorderer
+        }
         env = %{ env | toRun: env.toRun ++ [id] }
-        env = Enum.reduce(parents, env, &_addChild/2 )
+        env = case reorderer do
+            nil -> Enum.reduce(parents, env, &_addChild/2 )
+            _ -> _addChild(reorderer, env)
+        end
         { 
             %MockDNode{id: id}, 
             %{ env |  
                 id: env.id+1, 
-                nodes: Map.put(env.nodes, id, newDNode) 
+                nodes: Map.put(env.nodes, id, newDNode)
             }
         }
     end
@@ -123,8 +132,8 @@ defmodule Drepel.Env do
         end)
     end
 
-    def createNode(parents, fct, initState \\ &nilState/1) do
-        Agent.get_and_update(__MODULE__, &_addNode(&1, parents, fct, initState))
+    def createNode(parents, fct, initState \\ &nilState/1, reorderer \\ nil) do
+        Agent.get_and_update(__MODULE__, &_addNode(&1, parents, fct, initState, false, reorderer))
     end
 
     def createSink(parents, fct) do
@@ -142,15 +151,82 @@ defmodule Drepel.Env do
     def nilState(_nod) do
         nil
     end
+
+    def reorderComparator({t1, id1, eid1}, {t2, id2, eid2}) do
+        case Timex.compare(t1, t2) do
+            0 -> case RedBlackTree.compare_terms(id1, id2) do
+                0 -> RedBlackTree.compare_terms(eid1, eid2)
+                res -> res
+            end
+            res -> res
+        end
+    end
+
+    def _reorderScheduled(nod, timeoutTime, timestamp) do
+        case RedBlackTree.Utils.firstKV(nod.state.buff) do
+            nil -> nod
+            {{msgTime, sender, eid}, action} -> 
+                if !Timex.before?(timeoutTime, msgTime) do # after or equal <=> not before
+                    case action do
+                        {:onNext, val} -> Drepel.onNextAs(nod, val, sender, msgTime)
+                        {:onError, err} -> Drepel.onErrorAs(nod, err, sender, msgTime)
+                        {:onCompleted} -> Drepel.onCompletedAs(nod, sender, msgTime)
+                    end
+                    _reorderScheduled(%{ nod | state: %{ nod.state | buff: RedBlackTree.delete(nod.state.buff, {msgTime, sender, eid}) } }, timeoutTime, timestamp)
+                else
+                    nod
+                end
+        end
+    end
+
+    def reorder(dnodes) do
+        buffTime = 50
+        Drepel.Env.createNode(dnodes, %{
+            onNext: fn nod, sender, val, timestamp ->
+                if timestamp==0 do
+                    Drepel.onNextAs(nod, val, sender, timestamp)
+                    nod
+                else
+                    Scheduler.schedule(nod, Timex.now, buffTime, timestamp, nil, nod.state.eid)
+                    %{ nod | state: %{ nod.state | buff: RedBlackTree.insert(nod.state.buff, {timestamp, sender, nod.state.eid}, {:onNext, val}), eid: nod.state.eid+1 } }
+                end
+            end,
+            onCompleted: fn nod, sender, timestamp ->
+                if timestamp==0 do
+                    Drepel.onCompletedAs(nod, sender, timestamp)
+                    nod
+                else
+                    Scheduler.schedule(nod, Timex.now, buffTime, timestamp, nil, nod.state.eid)
+                    %{ nod | state: %{ nod.state | buff: RedBlackTree.insert(nod.state.buff, {timestamp, sender, nod.state.eid}, {:onCompleted}), eid: nod.state.eid+1 } }
+                end
+            end,
+            onError: fn nod, sender, err, timestamp ->
+                if timestamp==0 do
+                    Drepel.onErrorAs(nod, err, sender, timestamp)
+                    nod
+                else
+                    Scheduler.schedule(nod, Timex.now, buffTime, timestamp, nil, nod.state.eid)
+                    %{ nod | state: %{ nod.state | buff: RedBlackTree.insert(nod.state.buff, {timestamp, sender, nod.state.eid}, {:onError, err}), eid: nod.state.eid+1 } }
+                end
+            end, 
+            onScheduled: &_reorderScheduled/3
+        }, fn _nod -> %{ eid: 0, buff: RedBlackTree.new([], comparator: &reorderComparator/2)} end)
+    end
     
     @doc """ 
         Mid node is can hook on "completed" or "error" event. If not the
         signal will be propagated to the children of this node.
         """
-    def createMidNode(parents, fct, initState \\ &nilState/1) do
+    def createMidNode(parents, fct, initState \\ &nilState/1, opts \\ []) do
+        reorderer = if :proplists.get_value(:reorder, opts, false) and __MODULE__.get(:orderSensitive) do
+            %MockDNode{id: id} = reorder(parents)
+            id
+        else
+            nil
+        end
         case fct do
-            %{} -> createNode(parents, Enum.reduce(fct, %{}, fn {k, v}, acc -> Map.put(acc, k, Map.get(@errWrapper, k).(v)) end), initState)
-            _ -> createNode(parents, %{onNext: __MODULE__._arity3ErrWrapper(fct)}, initState)
+            %{} -> createNode(parents, Enum.reduce(fct, %{}, fn {k, v}, acc -> Map.put(acc, k, Map.get(@errWrapper, k).(v)) end), initState, reorderer)
+            _ -> createNode(parents, %{onNext: __MODULE__._arity3ErrWrapper(fct)}, initState, reorderer)
         end
     end
 

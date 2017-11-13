@@ -20,9 +20,9 @@ defmodule DrepelTest do
         :ok
     end
 
-    setup do
+    setup context do
         Agent.update(__MODULE__, fn _ -> [] end)
-        use Drepel
+        use Drepel, orderSensitive: Map.has_key?(context, :orderSensitive)
         :ok
     end
 
@@ -128,12 +128,10 @@ defmodule DrepelTest do
 
     test "interval" do
         interval(50)
+        |> take(3)
         |> collector
-        Drepel.run(200)
-        case length(collected()) do
-            3 -> assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}]
-            4 -> assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}]
-        end
+        Drepel.run()
+        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:compl, nil}]
     end
 
     test "map" do
@@ -162,23 +160,24 @@ defmodule DrepelTest do
         assert collected()==[{:next, 1}, {:next, 3}, {:next, 6}, {:next, 10}, {:compl, nil}]
     end
     
+    @tag orderSensitive: true
     test "buffer" do
         interval(25)
         |> buffer(interval(100))
         |> take(2)
         |> collector
-        Drepel.run(250)
-        assert collected()==[{:next, [0, 1, 2, 3]}, {:next, [4, 5, 6, 7]}]
+        Drepel.run()
+        assert collected()==[{:next, [0, 1, 2, 3]}, {:next, [4, 5, 6, 7]}, {:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "bufferBoundaries" do
         interval(25)
         |> bufferBoundaries(interval(100))
         |> take(2)
         |> collector
-        Drepel.run(350)
-        assert length(collected())==2
-        Enum.map(collected(), fn {:next, buff} -> assert length(buff)==4 end)
+        Drepel.run()
+        assert collected()==[{:next, [4, 5, 6, 7]}, {:next, [8, 9, 10, 11]}, {:compl, nil}]
     end
 
     # TODO bufferSwitch
@@ -247,7 +246,16 @@ defmodule DrepelTest do
         |> dematerialize()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}, ]
+        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+    end
+
+    test "timeInterval" do
+        interval(50)
+        |> timeInterval()
+        |> collector
+        Drepel.run(450)
+        average = Enum.reduce(collected(), 0, fn { :next, %{ interval: interval }}, acc -> acc+interval end)/length(collected())
+        assert average-50<5
     end
 
     test "reduce" do
@@ -282,12 +290,14 @@ defmodule DrepelTest do
         assert collected()==[{:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "sample" do
         interval(30)
         |> sample(100)
+        |> take(2)
         |> collector
-        Drepel.run(205)
-        assert collected()==[{:next, 2}, {:next, 5}]
+        Drepel.run()
+        assert collected()==[{:next, 2}, {:next, 5}, {:compl, nil}]
     end
 
     test "elementAt_1" do
@@ -404,6 +414,7 @@ defmodule DrepelTest do
         assert collected()==[{:next, 3}, {:next, 4}, {:next, 5}, {:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "merge_1" do
         n1 = from([
             %{value: 20, time: 30},
@@ -430,6 +441,7 @@ defmodule DrepelTest do
         assert collected()==[{:next, 20}, {:next, 40}, {:next, 60}, {:next, 1}, {:next, 80}, {:next, 100}, {:next, 1}, {:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "merge_2" do
         n1 = Drepel.throw("err1")
         |> delay(25)
@@ -518,11 +530,12 @@ defmodule DrepelTest do
         assert collected()==[{:err, "err"}]
     end
 
+    @tag orderSensitive: true
     test "combineLatest" do
         combineLatest(interval(50) |> delay(25), interval(50), fn v1, v2 -> "#{v1} #{v2}" end)
         |> take(7)
         |> collector
-        Drepel.run(300)
+        Drepel.run()
         assert collected()==[{:next, "0 0"}, {:next, "0 1"}, {:next, "1 1"}, {:next, "1 2"}, {:next, "2 2"}, {:next, "2 3"}, {:next, "3 3"}, {:compl, nil}]
     end
 
@@ -542,6 +555,7 @@ defmodule DrepelTest do
         assert collected()==[{:next, true}, {:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "amb" do
         amb([from([1,2,3]), from([4,5,6]) |> delay(50), from([7,8,9]) |> delay(100)])
         |> collector
@@ -619,12 +633,14 @@ defmodule DrepelTest do
         assert collected()==[{:next, false}, {:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "skipUntil" do
         interval(50)
         |> skipUntil(timer(120))
+        |> take(3)
         |> collector
-        Drepel.run(280)
-        assert collected()==[{:next, 2}, {:next, 3}, {:next, 4}]
+        Drepel.run()
+        assert collected()==[{:next, 2}, {:next, 3}, {:next, 4}, {:compl, nil}]
     end
 
     test "skipWhile" do
@@ -635,6 +651,7 @@ defmodule DrepelTest do
         assert collected()==[{:next, 3}, {:next, 4}, {:next, 5}, {:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "takeUntil_1" do
         interval(50)
         |> takeUntil(timer(120))
@@ -643,6 +660,7 @@ defmodule DrepelTest do
         assert collected()==[{:next, 0}, {:next, 1}, {:compl, nil}]
     end
 
+    @tag orderSensitive: true
     test "takeUntil_2" do
         empty()
         |> takeUntil(timer(100, 42))
@@ -699,8 +717,16 @@ defmodule DrepelTest do
         assert collected()==[{:next, [{"a", 1}, {"c", 1}]}, {:compl, nil}]
     end
 
-    test "average" do
+    test "average_1" do
         range(1,3)
+        |> average()
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 2.0}, {:compl, nil}]
+    end
+
+    test "average_2" do
+        from([1.0, 2.0, 3.0])
         |> average()
         |> collector
         Drepel.run()
