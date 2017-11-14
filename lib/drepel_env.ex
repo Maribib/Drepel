@@ -78,15 +78,23 @@ defmodule Drepel.Env do
         end)
     end
 
-    def getAllAncestor(env, id) do
-        node = Map.get(env.nodes, id)
-        Enum.reduce(node.parents, MapSet.new([id]), fn parentId, acc ->
-            if parentId != :dnode_0 do
-                MapSet.union(getAllAncestor(env, parentId), acc)
+    def getAll(env, id, extractor) do
+        nod = Map.get(env.nodes, id)
+        Enum.reduce(extractor.(nod), MapSet.new([id]), fn otherId, acc ->
+            if otherId != :dnode_0 do
+                MapSet.union(getAll(env, otherId, extractor), acc)
             else
                 acc
             end
         end)
+    end
+
+    def getAllAncestor(env, id) do
+        getAll(env, id, fn nod -> nod.parents end)
+    end
+
+    def getAllDescendant(env, id) do
+        getAll(env, id, fn nod -> nod.children end)
     end
 
     def runWithAncestors(id) do 
@@ -107,6 +115,30 @@ defmodule Drepel.Env do
                 children: env.children -- ancestors, 
                 nodes: Map.drop(env.nodes, ancestors)
             }
+        end)
+    end
+
+    def removeWithDescendants(ids) do
+        Agent.update(__MODULE__, fn env ->
+            IO.puts inspect ids
+            Enum.reduce(ids, env, fn id, env ->
+                if Map.has_key?(env.nodes, id) do
+                    descendants = MapSet.to_list(getAllDescendant(env, id))
+                    IO.puts "descendants #{inspect descendants}"
+                    env = Enum.reduce(ids, env, fn id, env -> 
+                        Enum.reduce(Map.get(env.nodes, id).parents, env, fn parentId, env ->
+                            parentNode = Map.get(env.nodes, parentId)
+                            %{ env | nodes: %{ env.nodes | parentId => %{ parentNode | children: parentNode.children -- [id] } } }
+                        end)
+                    end)
+                    %{ env | 
+                        children: env.children -- descendants, 
+                        nodes: Map.drop(env.nodes, descendants)
+                    }
+                else
+                    env
+                end
+            end)
         end)
     end
 

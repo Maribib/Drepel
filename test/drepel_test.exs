@@ -159,6 +159,26 @@ defmodule DrepelTest do
         Drepel.run()
         assert collected()==[{:next, 1}, {:next, 3}, {:next, 6}, {:next, 10}, {:compl, nil}]
     end
+
+    @tag orderSensitive: true
+    test "window" do
+        interval(25)
+        |> take(20)
+        |> window(100)
+        |> subscribe(fn window, wid ->
+            window |> sum() |> map(fn el -> {wid, el} end) |> collector
+        end)
+        Drepel.run()
+        compls = Enum.filter(collected(), fn {tag, val} -> tag==:compl end)
+        assert length(compls)==6
+        vals = collected() |> Enum.filter(fn {tag, val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
+        assert Map.get(vals, 0)==0+1+2+3
+        assert Map.get(vals, 1)==4+5+6+7
+        assert Map.get(vals, 2)==8+9+10+11
+        assert Map.get(vals, 3)==12+13+14+15
+        assert Map.get(vals, 4)==16+17+18+19
+        assert Map.get(vals, 5)==0
+    end
     
     @tag orderSensitive: true
     test "buffer" do
@@ -256,6 +276,15 @@ defmodule DrepelTest do
         Drepel.run(450)
         average = Enum.reduce(collected(), 0, fn { :next, %{ interval: interval }}, acc -> acc+interval end)/length(collected())
         assert average-50<5
+    end
+
+    test "timeout" do
+        interval(50)
+        |> take(4)
+        |> timeout(50)
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil} ]
     end
 
     test "reduce" do
@@ -656,7 +685,7 @@ defmodule DrepelTest do
         interval(50)
         |> takeUntil(timer(120))
         |> collector
-        Drepel.run(280)
+        Drepel.run()
         assert collected()==[{:next, 0}, {:next, 1}, {:compl, nil}]
     end
 

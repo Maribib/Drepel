@@ -13,6 +13,11 @@ defmodule MockGroup do
     defstruct [:id]
 end
 
+defmodule MockWindow do
+    @enforce_keys [:id, :start]
+    defstruct [:id, :start]
+end
+
 defmodule Drepel do
     use Agent
     use Task
@@ -56,6 +61,10 @@ defmodule Drepel do
     def onCompleted(%DNode{id: sender, children: children, timestamp: timestamp}) do
         Enum.map(children, &DNode.onCompleted(&1, sender, timestamp))
         Manager.normalExit(self())
+    end
+
+    def onCompleted(%DNode{id: sender, timestamp: timestamp}, children) do
+        Enum.map(children, &DNode.onCompleted(&1, sender, timestamp))
     end
 
     def onError(%DNode{id: sender, children: children, timestamp: timestamp}, err) do
@@ -283,6 +292,65 @@ defmodule Drepel do
         end, fn _ -> init end)
     end
 
+    def window(%MockDNode{id: id1}, %MockDNode{id: id2}) do
+        res = Drepel.Env.createMidNode([id1, id2], %{
+            onNext: fn nod, sender, val, _ ->
+                IO.puts "window #{sender} #{val}"
+                case sender do
+                    ^id1 -> 
+                        onNext(nod, [{:val, val}])
+                    ^id2 -> 
+                        onNext(nod, [:close, :open])
+                end
+                nod
+            end,
+            onCompleted: fn nod, sender, _ ->
+                case sender do
+                    ^id1 -> onCompleted(nod)
+                    ^id2 -> nil
+                end
+                nod
+            end
+        }, fn _ -> nil end, reorder: true)
+        %MockWindow{id: res.id, start: :open}
+    end
+
+    def window(%MockDNode{}=nod, timespan) when is_integer(timespan) do
+        window(nod, interval(timespan))
+    end
+
+    def subscribe(%MockWindow{id: id, start: startState}, fct) do
+        res = Drepel.Env.createMidNode([id], fn nod, _, actions, _  ->
+            Enum.reduce(actions, nod, fn el, nod ->
+                case el do
+                    {:val, val} -> 
+                        onNext(nod, val)
+                        nod
+                    :close -> 
+                        [ head | tail ] = nod.state.buff
+                        removedChildren = Enum.slice(nod.children, 0..head-1)
+                        onCompleted(nod, removedChildren)
+                        Drepel.Env.removeWithDescendants(removedChildren)
+                        %{ nod | children: Enum.slice(nod.children, head..-1), state: %{ nod.state | buff: tail } }
+                    :open -> 
+                        oldChildren = Drepel.Env.getNode(nod.id).children
+                        fct.(%MockDNode{id: nod.id}, nod.state.wid)
+                        newChildren = Drepel.Env.getNode(nod.id).children -- oldChildren
+                        nodes = Drepel.Env.startAllNodes()
+                        nod = Drepel.Env.updateAllChildrenFromNode(nodes, nod)
+                        %{ nod | state: %{ nod.state | buff: nod.state.buff ++ [length(newChildren)], wid: nod.state.wid+1 } }
+                end
+            end)
+        end, fn nod -> 
+            len = length(nod.children)
+            %{ buff: len==0 && [] || [len], wid: len==0 && 0 || 1 }
+        end)
+        if startState==:open do
+            fct.(%MockDNode{id: res.id}, 0)
+        end
+        nil
+    end
+
     def _buffer(id, boundId, init, %{onNextVal: nextValFct, onNextBound: nextBoundFct}) do
         Drepel.Env.createMidNode([id, boundId], fn nod, sender, val, _ ->
             case sender do
@@ -473,6 +541,44 @@ defmodule Drepel do
             onNext(nod, %{ interval: Timex.diff(now, nod.state)/1000, value: val})
             %{ nod | state: now }
         end, fn _ -> Timex.now end)
+    end
+
+    def timeout(%MockDNode{id: id}, timespan, errMsg \\ "Timeout.") when is_integer(timespan) do
+        Drepel.Env.createMidNode([id], %{
+            onNext: fn nod, _, val, _ ->
+                if nod.state.done do
+                    nod
+                else
+                    Scheduler.schedule(nod, Timex.now, timespan, nod.state.eid, nil, nod.state)
+                    onNext(nod, val)
+                    %{ nod | state: %{ nod.state | eid: nod.state.eid+1 } }
+                end
+            end,
+            onCompleted: fn nod, _, _ ->
+                if nod.state.done do
+                    nod
+                else
+                    onCompleted(nod)
+                    %{ nod | state: %{ nod.state | done: true } }
+                end
+            end,
+            onError: fn nod, _, err, _ ->
+                if nod.state.done do
+                    nod
+                else
+                    onError(nod, err)
+                    %{ nod | state: %{ nod.state | done: true } }
+                end
+            end,
+            onScheduled: fn nod, index, _ ->
+                if !nod.state.done and index==nod.state.eid-1 do
+                    onError(nod, errMsg)
+                    %{ nod | state: %{ nod.state | done: true } }
+                else
+                    nod
+                end
+            end
+        }, fn _ -> %{ eid: 0, done: false } end)
     end
 
     def reduce(%MockDNode{id: id}, fct, init \\ 0) do
@@ -913,28 +1019,25 @@ defmodule Drepel do
         values = Enum.to_list(binding() |> tl() |> Stream.filter(fn {_, b} -> !is_nil(b) end) |> Stream.map(fn {_, b} -> b end))
         res = Drepel.Env.createMidNode([id], %{
             onNext: fn nod, _, val, _ -> 
-                if nod.state.done do
-                    onNext(nod, val)
-                    nod
-                else
-                    update_in(nod.state.values, &(&1 ++ [val]))
-                end
+                Enum.map(nod.state, &onNext(nod, &1))
+                onNext(nod, val)
+                %{ nod | state: [] }
             end,
             onError: fn nod, _, err, _ ->
-                Enum.map(nod.state.values, &onNext(nod, &1))
+                Enum.map(nod.state, &onNext(nod, &1))
                 onError(nod, err)
-                %{ nod | state: %{ nod.state | done: true, values: [] } }
+                %{ nod | state: [] }
             end,
             onCompleted: fn nod, _, _ ->
-                Enum.map(nod.state.values, &onNext(nod, &1))
+                Enum.map(nod.state, &onNext(nod, &1))
                 onCompleted(nod)
-                %{ nod | state: %{ nod.state | done: true, values: [] } }
+                %{ nod | state: [] }
             end,
             onScheduled: fn nod, _, _ -> 
-                Enum.map(nod.state.values, &onNext(nod, &1))
-                %{ nod | state: %{ nod.state | done: true, values: [] } }
+                Enum.map(nod.state, &onNext(nod, &1))
+                %{ nod | state: [] }
             end
-        }, fn _ -> %{ values: values, done: false } end)
+        }, fn _ -> values end)
         EventCollector.schedule(res, 0)
         res
     end
@@ -1413,8 +1516,7 @@ defmodule Drepel do
                 nodes = Drepel.Env.startAllNodes()
                 nod = Drepel.Env.updateAllChildrenFromNode(nodes, nod)
                 onNext(nod, newChildren, val)
-                res = %{ nod | state: Map.put(nod.state, key, newChildren) }
-                res
+                %{ nod | state: Map.put(nod.state, key, newChildren) }
             end
         end, fn _ -> %{} end)
         nil
