@@ -7,8 +7,12 @@ defmodule Scheduler do
         res
     end
 
-    def schedule(%DNode{id: id}, now, time, name \\ nil, onRun \\ nil, eid \\ nil) do # online scheduling
+    def schedule(nod, now, time, name \\ nil, onRun \\ nil, eid \\ nil)
+    def schedule(%DNode{id: id, reorderer: reorderer}, now, time, name, onRun, eid) when is_nil(reorderer) do # online scheduling to reorderer
         send(__MODULE__, Schedule.shiftMilisec(now, %Event{id: id, time: time, name: name, onRun: onRun, eid: eid}))
+    end
+    def schedule(%DNode{id: id, reorderer: reorderer}, now, time, name, onRun, eid) do # online scheduling
+        send(__MODULE__, Schedule.shiftMilisec(now, %Event{id: reorderer, time: time, name: {:val, id, name}, onRun: onRun, eid: eid}))
     end
 
     def run do

@@ -8,7 +8,12 @@ defmodule EventCollector do
     end
 
     def schedule(%MockDNode{id: id}, time, name \\ nil, onRun \\ nil, eid \\ nil) do
-        GenServer.cast(__MODULE__, {:schedule, %Event{id: id, time: time, name: name, onRun: onRun, eid: eid}})
+        %DNode{reorderer: reorderer} = Drepel.Env.getNode(id) 
+        if is_nil(reorderer) do
+            GenServer.cast(__MODULE__, {:schedule, %Event{id: id, time: time, name: name, onRun: onRun, eid: eid}})
+        else 
+            GenServer.cast(__MODULE__, {:schedule, %Event{id: reorderer, time: time, name: {:val, id, name}, onRun: onRun, eid: eid}})
+        end
     end
 
     def getEvents() do

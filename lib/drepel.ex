@@ -295,7 +295,6 @@ defmodule Drepel do
     def window(%MockDNode{id: id1}, %MockDNode{id: id2}) do
         res = Drepel.Env.createMidNode([id1, id2], %{
             onNext: fn nod, sender, val, _ ->
-                IO.puts "window #{sender} #{val}"
                 case sender do
                     ^id1 -> 
                         onNext(nod, [{:val, val}])
@@ -317,6 +316,45 @@ defmodule Drepel do
 
     def window(%MockDNode{}=nod, timespan) when is_integer(timespan) do
         window(nod, interval(timespan))
+    end
+
+    def windowWithCount(%MockDNode{id: id}, winSize) when is_integer(winSize) do
+        res = Drepel.Env.createMidNode([id], fn nod, _, val, _ ->
+            if nod.state>0 do
+                onNext(nod, [{:val, val}])
+                %{ nod | state: nod.state-1 }
+            else
+                onNext(nod, [:close, :open, {:val, val}])
+                %{ nod | state: winSize-1 }
+            end
+        end, fn _ -> winSize end)
+        %MockWindow{id: res.id, start: :open}
+    end
+
+    def slidingWindow(%MockDNode{id: id1}, %MockDNode{id: id2}, timespan) when is_integer(timespan) do
+        res = Drepel.Env.createMidNode([id1, id2], %{
+            onNext: fn nod, sender, val, timestamp ->
+                case sender do
+                    ^id1 ->
+                        onNext(nod, [{:val, val}])
+                        nod
+                    ^id2 -> 
+                        Scheduler.schedule(nod, timestamp, timespan, nil, nil, nod.state)
+                        onNext(nod, [:open])
+                        %{ nod | state: nod.state+1 }
+                end
+            end,
+            onScheduled: fn nod, _, _ ->
+                onNext(nod, [:close])
+                nod
+            end
+        }, fn _ -> 1 end, reorder: true)
+        EventCollector.schedule(res, timespan, nil, nil, 0)
+        %MockWindow{id: res.id, start: :open}
+    end
+
+    def slidingWindow(%MockDNode{}=nod, period, timespan) when is_integer(period) and is_integer(timespan) do
+        slidingWindow(nod, interval(period), timespan)
     end
 
     def subscribe(%MockWindow{id: id, start: startState}, fct) do
@@ -545,11 +583,11 @@ defmodule Drepel do
 
     def timeout(%MockDNode{id: id}, timespan, errMsg \\ "Timeout.") when is_integer(timespan) do
         Drepel.Env.createMidNode([id], %{
-            onNext: fn nod, _, val, _ ->
+            onNext: fn nod, _, val, timestamp ->
                 if nod.state.done do
                     nod
                 else
-                    Scheduler.schedule(nod, Timex.now, timespan, nod.state.eid, nil, nod.state)
+                    Scheduler.schedule(nod, timestamp, timespan, nod.state.eid, nil, nod.state)
                     onNext(nod, val)
                     %{ nod | state: %{ nod.state | eid: nod.state.eid+1 } }
                 end
@@ -578,7 +616,7 @@ defmodule Drepel do
                     nod
                 end
             end
-        }, fn _ -> %{ eid: 0, done: false } end)
+        }, fn _ -> %{ eid: 0, done: false } end, reorder: true)
     end
 
     def reduce(%MockDNode{id: id}, fct, init \\ 0) do

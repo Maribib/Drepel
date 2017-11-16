@@ -169,15 +169,57 @@ defmodule DrepelTest do
             window |> sum() |> map(fn el -> {wid, el} end) |> collector
         end)
         Drepel.run()
-        compls = Enum.filter(collected(), fn {tag, val} -> tag==:compl end)
+        compls = Enum.filter(collected(), fn {tag, _val} -> tag==:compl end)
         assert length(compls)==6
-        vals = collected() |> Enum.filter(fn {tag, val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
+        vals = collected() |> Enum.filter(fn {tag, _val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
         assert Map.get(vals, 0)==0+1+2+3
         assert Map.get(vals, 1)==4+5+6+7
         assert Map.get(vals, 2)==8+9+10+11
         assert Map.get(vals, 3)==12+13+14+15
         assert Map.get(vals, 4)==16+17+18+19
         assert Map.get(vals, 5)==0
+    end
+
+    test "windowWithCount" do
+        range(1..20)
+        |> windowWithCount(4)
+        |> subscribe(fn window, wid ->
+            window |> sum() |> map(fn el -> {wid, el} end) |> collector
+        end)
+        Drepel.run()
+        compls = Enum.filter(collected(), fn {tag, _val} -> tag==:compl end)
+        assert length(compls)==5
+        vals = collected() |> Enum.filter(fn {tag, _val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
+        assert Map.get(vals, 0)==1+2+3+4
+        assert Map.get(vals, 1)==5+6+7+8
+        assert Map.get(vals, 2)==9+10+11+12
+        assert Map.get(vals, 3)==13+14+15+16
+        assert Map.get(vals, 4)==17+18+19+20
+    end
+
+    @tag orderSensitive: true
+    test "slidingWindow" do
+        interval(25)
+        |> take(20)
+        |> slidingWindow(50, 100)
+        |> subscribe(fn window, wid ->
+            window |> sum() |> map(fn el -> {wid, el} end) |> collector
+        end)
+        Drepel.run()
+        compls = Enum.filter(collected(), fn {tag, _val} -> tag==:compl end)
+        assert length(compls)==11
+        vals = collected() |> Enum.filter(fn {tag, _val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
+        assert Map.get(vals, 0)==0+1+2+3
+        assert Map.get(vals, 1)==2+3+4+5
+        assert Map.get(vals, 2)==4+5+6+7
+        assert Map.get(vals, 3)==6+7+8+9
+        assert Map.get(vals, 4)==8+9+10+11
+        assert Map.get(vals, 5)==10+11+12+13
+        assert Map.get(vals, 6)==12+13+14+15
+        assert Map.get(vals, 7)==14+15+16+17
+        assert Map.get(vals, 8)==16+17+18+19
+        assert Map.get(vals, 9)==18+19
+        assert Map.get(vals, 10)==0
     end
     
     @tag orderSensitive: true
@@ -278,13 +320,26 @@ defmodule DrepelTest do
         assert average-50<5
     end
 
-    test "timeout" do
+    @tag orderSensitive: true
+    test "timeout_1" do
         interval(50)
         |> take(4)
         |> timeout(50)
         |> collector
         Drepel.run()
         assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil} ]
+    end
+
+    @tag orderSensitive: true
+    test "timeout_2" do
+        n1 = interval(50)
+        |> take(3)
+        n2 = timer(201, 3)
+        merge([n1, n2])
+        |> timeout(50, "err")
+        |> collector
+        Drepel.run()
+        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:err, "err"} ]
     end
 
     test "reduce" do
@@ -409,6 +464,7 @@ defmodule DrepelTest do
         assert collected()==[{:err, "Any element match condition."}]
     end
 
+    @tag orderSensitive: true
     test "debounce" do
         from([
             %{value: 0, time: 100},

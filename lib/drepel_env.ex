@@ -120,11 +120,9 @@ defmodule Drepel.Env do
 
     def removeWithDescendants(ids) do
         Agent.update(__MODULE__, fn env ->
-            IO.puts inspect ids
             Enum.reduce(ids, env, fn id, env ->
                 if Map.has_key?(env.nodes, id) do
                     descendants = MapSet.to_list(getAllDescendant(env, id))
-                    IO.puts "descendants #{inspect descendants}"
                     env = Enum.reduce(ids, env, fn id, env -> 
                         Enum.reduce(Map.get(env.nodes, id).parents, env, fn parentId, env ->
                             parentNode = Map.get(env.nodes, parentId)
@@ -203,6 +201,7 @@ defmodule Drepel.Env do
                         {:onNext, val} -> Drepel.onNextAs(nod, val, sender, msgTime)
                         {:onError, err} -> Drepel.onErrorAs(nod, err, sender, msgTime)
                         {:onCompleted} -> Drepel.onCompletedAs(nod, sender, msgTime)
+                        {:onScheduled, id, val} -> DNode.onScheduled(id, val, timestamp)
                     end
                     _reorderScheduled(%{ nod | state: %{ nod.state | buff: RedBlackTree.delete(nod.state.buff, {msgTime, sender, eid}) } }, timeoutTime, timestamp)
                 else
@@ -241,7 +240,15 @@ defmodule Drepel.Env do
                     %{ nod | state: %{ nod.state | buff: RedBlackTree.insert(nod.state.buff, {timestamp, sender, nod.state.eid}, {:onError, err}), eid: nod.state.eid+1 } }
                 end
             end, 
-            onScheduled: &_reorderScheduled/3
+            onScheduled: fn nod, el, timestamp ->
+                case el do
+                    {:val, id, val} -> 
+                        Scheduler.schedule(nod, Timex.now, buffTime, timestamp, nil, nod.state.eid)
+                        %{ nod | state: %{ nod.state | buff: RedBlackTree.insert(nod.state.buff, {timestamp, nil, nod.state.eid}, {:onScheduled, id, val}), eid: nod.state.eid+1 } }
+                    _ -> _reorderScheduled(nod, el, timestamp)
+                    
+                end
+            end
         }, fn _nod -> %{ eid: 0, buff: RedBlackTree.new([], comparator: &reorderComparator/2)} end)
     end
     
