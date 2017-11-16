@@ -77,7 +77,8 @@ defmodule Schedule do
     end
 
     def init(:ok) do
-        events = Enum.map(EventCollector.getEvents(), &shiftMilisec(Timex.now, &1))
+        now = Timex.now
+        events = Enum.map(EventCollector.getEvents(), &shiftMilisec(now, &1))
         GenServer.stop(EventCollector)
         {:ok, RedBlackTree.new(events, comparator: &Schedule._comparator/2) }
     end

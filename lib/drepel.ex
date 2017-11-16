@@ -1053,6 +1053,64 @@ defmodule Drepel do
         combineLatest([dnode1, dnode2], combineFct)
     end
 
+    def join(%MockDNode{id: id1}, %MockDNode{id: id2}, timespan1, timespan2, joinFct) when is_integer(timespan1) and is_integer(timespan2) and is_function(joinFct) do
+        Drepel.Env.createMidNode([id1, id2], %{
+            onNext: fn nod, sender, val, timestamp ->
+                buff = case sender do
+                    ^id1 -> 
+                        Scheduler.schedule(nod, timestamp, timespan1, id1, nil, nod.state.eid)
+                        Enum.map(Map.get(nod.state.buff, id2), &onNext(nod, joinFct.(val, &1)))
+                        %{ nod.state.buff | id1 => Map.get(nod.state.buff, id1) ++ [val] }
+                    ^id2 -> 
+                        Scheduler.schedule(nod, timestamp, timespan2, id2, nil, nod.state.eid)
+                        Enum.map(Map.get(nod.state.buff, id1), &onNext(nod, joinFct.(&1, val)))
+                        %{ nod.state.buff | id2 => Map.get(nod.state.buff, id2) ++ [val] }
+                end
+                %{ nod | state: %{ nod.state | buff: buff, eid: nod.state.eid+1 } }
+            end,
+            onCompleted: fn nod, sender, _ ->
+                if !Map.get(nod.state.compls, sender) do
+                    if nod.state.compl==1 do
+                        if length(nod.state.errBuff)>0 do
+                            onError(nod, nod.state.errBuff)
+                        else
+                            onCompleted(nod)
+                        end
+                    end
+                    %{ nod | state: %{ nod.state | 
+                        compls: %{ nod.state.compls | sender => true }, 
+                        compl: nod.state.compl+1, 
+                    } }
+                else
+                    nod
+                end
+            end,
+            onError: fn nod, sender, err, _ ->
+                if !Map.get(nod.state.compls, sender) do
+                    if nod.state.compl==1 do
+                        onError(nod, nod.state.errBuff ++ err)
+                    end
+                    %{ nod | state: %{ nod.state | 
+                        compls: %{ nod.state.compls | sender => true }, 
+                        compl: nod.state.compl+1, 
+                        errBuff: nod.state.errBuff ++ [err]
+                    } }
+                else
+                    nod
+                end
+            end,
+            onScheduled: fn nod, id, _ ->
+                update_in(nod.state.buff[id], &tl(&1))
+            end
+        }, fn _ -> %{ 
+            compl: 0,
+            compls: %{ id1 => false, id2 => false }, 
+            errBuff: [], 
+            buff: %{ id1 => [], id2 => [] }, 
+            eid: 0 
+        } end, reorder: true)
+    end
+
     def startWith(%MockDNode{id: id}, v1, v2 \\ nil, v3 \\ nil, v4 \\ nil, v5 \\ nil, v6 \\ nil, v7 \\ nil, v8 \\ nil, v9 \\ nil) do
         values = Enum.to_list(binding() |> tl() |> Stream.filter(fn {_, b} -> !is_nil(b) end) |> Stream.map(fn {_, b} -> b end))
         res = Drepel.Env.createMidNode([id], %{
@@ -1075,7 +1133,10 @@ defmodule Drepel do
                 Enum.map(nod.state, &onNext(nod, &1))
                 %{ nod | state: [] }
             end
-        }, fn _ -> values end)
+        }, fn _ -> 
+            IO.puts inspect values
+            values 
+        end)
         EventCollector.schedule(res, 0)
         res
     end

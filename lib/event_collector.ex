@@ -30,7 +30,7 @@ defmodule EventCollector do
         { :noreply,  state ++ [ anEvent ] }
     end
 
-    def handle_call({:getEvents}, from, state) do
+    def handle_call({:getEvents}, _from, state) do
         { :reply, state, state } 
     end
 end

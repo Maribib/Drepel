@@ -201,7 +201,7 @@ defmodule Drepel.Env do
                         {:onNext, val} -> Drepel.onNextAs(nod, val, sender, msgTime)
                         {:onError, err} -> Drepel.onErrorAs(nod, err, sender, msgTime)
                         {:onCompleted} -> Drepel.onCompletedAs(nod, sender, msgTime)
-                        {:onScheduled, id, val} -> DNode.onScheduled(id, val, timestamp)
+                        {:onScheduled, id, val} -> DNode.onScheduled(id, val, msgTime)
                     end
                     _reorderScheduled(%{ nod | state: %{ nod.state | buff: RedBlackTree.delete(nod.state.buff, {msgTime, sender, eid}) } }, timeoutTime, timestamp)
                 else

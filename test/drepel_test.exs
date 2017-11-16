@@ -34,7 +34,7 @@ defmodule DrepelTest do
         end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:next, 41}, {:compl, nil}]
+        assert collected()==[next: 42, next: 41, compl: nil]
     end
 
     test "create 1source-2sub" do
@@ -67,63 +67,63 @@ defmodule DrepelTest do
         just("plop")
         |> collector
         Drepel.run()
-        assert collected()==[{:next, "plop"}, {:compl, nil}]
+        assert collected()==[next: "plop", compl: nil]
     end
 
     test "start" do
         start(fn -> "res" end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, "res"}, {:compl, nil}]
+        assert collected()==[next: "res", compl: nil]
     end
 
     test "repeat" do
         repeat(100, 3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 100}, {:next, 100}, {:next, 100}, {:compl, nil}]
+        assert collected()==[next: 100, next: 100, next: 100, compl: nil]
     end
 
     test "range_1" do
         range(1..3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
     end
 
     test "range_2" do
         range(1, 3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
     end
 
     test "from_1" do
         from(["a", "b", "c"])
         |> collector
         Drepel.run()
-        assert collected()==[{:next, "a"}, {:next, "b"}, {:next, "c"}, {:compl, nil}]
+        assert collected()==[next: "a", next: "b", next: "c", compl: nil]
     end
 
     test "from_2" do
         from("bar")
         |> collector
         Drepel.run()
-        assert collected()==[{:next, "b"}, {:next, "a"}, {:next, "r"}, {:compl, nil}]
+        assert collected()==[next: "b", next: "a", next: "r", compl: nil]
     end
 
     test "from_3" do
         from(1, 2, 3, 4)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:next, 4}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, next: 3, next: 4, compl: nil]
     end
 
     test "timer" do
         timer(200, 42)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:compl, nil}]
+        assert collected()==[next: 42, compl: nil]
     end
 
     test "interval" do
@@ -131,7 +131,7 @@ defmodule DrepelTest do
         |> take(3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 0, next: 1, next: 2, compl: nil]
     end
 
     test "map" do
@@ -139,7 +139,7 @@ defmodule DrepelTest do
         |> map(fn el -> el*10 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 10}, {:next, 20}, {:next, 30}, {:compl, nil}]
+        assert collected()==[next: 0, next: 10, next: 20, next: 30, compl: nil]
     end
 
     test "flatmap" do
@@ -149,7 +149,7 @@ defmodule DrepelTest do
         end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, next: 2, compl: nil]
     end
 
     test "scan" do
@@ -157,7 +157,7 @@ defmodule DrepelTest do
         |> scan(fn val, acc -> val+acc end, 0)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 3}, {:next, 6}, {:next, 10}, {:compl, nil}]
+        assert collected()==[next: 1, next: 3, next: 6, next: 10, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -229,7 +229,7 @@ defmodule DrepelTest do
         |> take(2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, [0, 1, 2, 3]}, {:next, [4, 5, 6, 7]}, {:compl, nil}]
+        assert collected()==[next: [0, 1, 2, 3], next: [4, 5, 6, 7], compl: nil]
     end
 
     @tag orderSensitive: true
@@ -239,7 +239,7 @@ defmodule DrepelTest do
         |> take(2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, [4, 5, 6, 7]}, {:next, [8, 9, 10, 11]}, {:compl, nil}]
+        assert collected()==[next: [4, 5, 6, 7], next: [8, 9, 10, 11], compl: nil]
     end
 
     # TODO bufferSwitch
@@ -251,7 +251,7 @@ defmodule DrepelTest do
         |> delay(200)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 10}, {:compl, nil}]
+        assert collected()==[next: 10, compl: nil]
     end
 
     test "tap_1" do
@@ -261,7 +261,7 @@ defmodule DrepelTest do
         |> collector
         Drepel.run()
         assert Agent.get(:tap, &(&1))==[1, 2, :compl]
-        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, compl: nil]
         Agent.stop(:tap)
     end
 
@@ -274,7 +274,7 @@ defmodule DrepelTest do
         |> collector
         Drepel.run()
         assert Agent.get(:tap, &(&1))==[1, 2, :compl]
-        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, compl: nil]
         Agent.stop(:tap)
     end
 
@@ -283,7 +283,7 @@ defmodule DrepelTest do
         |> materialize()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, {&onNext/2, 42}}, {:next, {&onCompleted/1, nil}}, {:compl, nil}]
+        assert collected()==[next: {&onNext/2, 42}, next: {&onCompleted/1, nil}, compl: nil]
     end
 
     test "dematerialize_1" do
@@ -291,7 +291,7 @@ defmodule DrepelTest do
         |> dematerialize()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:compl, nil}]
+        assert collected()==[next: 42, compl: nil]
     end
 
     test "dematerialize_2" do
@@ -308,7 +308,7 @@ defmodule DrepelTest do
         |> dematerialize()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
     end
 
     test "timeInterval" do
@@ -327,7 +327,7 @@ defmodule DrepelTest do
         |> timeout(50)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil} ]
+        assert collected()==[next: 0, next: 1, next: 2, next: 3, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -339,7 +339,7 @@ defmodule DrepelTest do
         |> timeout(50, "err")
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:err, "err"} ]
+        assert collected()==[next: 0, next: 1, next: 2, err: "err"]
     end
 
     test "reduce" do
@@ -347,7 +347,7 @@ defmodule DrepelTest do
         |> reduce(fn v, acc -> v+acc end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 15}, {:compl, nil}]
+        assert collected()==[next: 15, compl: nil]
     end
 
     test "skip" do
@@ -355,7 +355,7 @@ defmodule DrepelTest do
         |> skip(3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 3}, {:next, 4}, {:compl, nil}]
+        assert collected()==[next: 3, next: 4, compl: nil]
     end
 
     test "skipLast" do
@@ -363,7 +363,7 @@ defmodule DrepelTest do
         |> skipLast(2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, compl: nil]
     end
 
     test "ignoreElements" do
@@ -371,7 +371,7 @@ defmodule DrepelTest do
         |> ignoreElements()
         |> collector
         Drepel.run()
-        assert collected()==[{:compl, nil}]
+        assert collected()==[compl: nil]
     end
 
     @tag orderSensitive: true
@@ -381,7 +381,7 @@ defmodule DrepelTest do
         |> take(2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 2}, {:next, 5}, {:compl, nil}]
+        assert collected()==[next: 2, next: 5, compl: nil]
     end
 
     test "elementAt_1" do
@@ -389,7 +389,7 @@ defmodule DrepelTest do
         |> elementAt(2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 2}, {:compl, nil}]
+        assert collected()==[next: 2, compl: nil]
     end
 
     test "elementAt_2" do
@@ -397,7 +397,7 @@ defmodule DrepelTest do
         |> elementAt(2)
         |> collector
         Drepel.run()
-        assert collected()==[{:err, "Argument out of range"}]
+        assert collected()==[err: "Argument out of range"]
     end
 
     test "distinct" do
@@ -405,7 +405,7 @@ defmodule DrepelTest do
         |> distinct()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
     end
 
     test "filter" do
@@ -413,7 +413,7 @@ defmodule DrepelTest do
         |> filter(fn el -> el>10 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 30}, {:next, 22}, {:next, 60}, {:compl, nil}]
+        assert collected()==[next: 30, next: 22, next: 60, compl: nil]
     end
 
     test "first_1" do
@@ -421,7 +421,7 @@ defmodule DrepelTest do
         |> first()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 2}, {:compl, nil}]
+        assert collected()==[next: 2, compl: nil]
     end
 
     test "first_2" do
@@ -429,7 +429,7 @@ defmodule DrepelTest do
         |> first(fn el -> el>10 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 30}, {:compl, nil}]
+        assert collected()==[next: 30, compl: nil]
     end
 
     test "first_3" do
@@ -437,7 +437,7 @@ defmodule DrepelTest do
         |> first(fn el -> el>100 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:err, "Any element match condition."}]
+        assert collected()==[err: "Any element match condition."]
     end
 
     test "last_1" do
@@ -445,7 +445,7 @@ defmodule DrepelTest do
         |> last()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:compl, nil}]
+        assert collected()==[next: 1, compl: nil]
     end
 
     test "last_2" do
@@ -453,7 +453,7 @@ defmodule DrepelTest do
         |> last(fn el -> el>10 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 60}, {:compl, nil}]
+        assert collected()==[next: 60, compl: nil]
     end
 
     test "last_3" do
@@ -461,7 +461,7 @@ defmodule DrepelTest do
         |> last(fn el -> el>10 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:err, "Any element match condition."}]
+        assert collected()==[err: "Any element match condition."]
     end
 
     @tag orderSensitive: true
@@ -480,7 +480,7 @@ defmodule DrepelTest do
         |> debounce(500)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 2}, {:next, 4}, {:compl, nil}]
+        assert collected()==[next: 0, next: 2, next: 4, compl: nil]
     end
 
     test "take" do
@@ -488,7 +488,7 @@ defmodule DrepelTest do
         |> take(3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 0, next: 1, next: 2, compl: nil]
     end
 
     test "takeLast" do
@@ -496,7 +496,7 @@ defmodule DrepelTest do
         |> takeLast(3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 3}, {:next, 4}, {:next, 5}, {:compl, nil}]
+        assert collected()==[next: 3, next: 4, next: 5, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -523,7 +523,7 @@ defmodule DrepelTest do
         merge(n1, n2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 20}, {:next, 40}, {:next, 60}, {:next, 1}, {:next, 80}, {:next, 100}, {:next, 1}, {:compl, nil}]
+        assert collected()==[next: 20, next: 40, next: 60, next: 1, next: 80, next: 100, next: 1, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -537,7 +537,7 @@ defmodule DrepelTest do
         merge([n1, n2, n3])
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:err, ["err1", "err2"]}]
+        assert collected()==[next: 42, err: ["err1", "err2"]]
     end
 
     test "zip" do
@@ -563,7 +563,7 @@ defmodule DrepelTest do
         end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, "1A"}, {:next, "2B"}, {:next, "3C"}, {:next, "4D"}, {:compl, nil}]
+        assert collected()==[next: "1A", next: "2B", next: "3C", next: "4D", compl: nil]
     end
 
     test "catch_1" do
@@ -576,7 +576,7 @@ defmodule DrepelTest do
         end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:next, 3}, {:compl, nil}]
+        assert collected()==[next: 42, next: 3, compl: nil]
     end
 
     test "catch_2" do
@@ -589,7 +589,7 @@ defmodule DrepelTest do
         end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:err, "err2"}]
+        assert collected()==[next: 42, err: "err2"]
     end
 
     test "retry_1" do
@@ -603,7 +603,7 @@ defmodule DrepelTest do
         |> retry()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:next, 42}, {:compl, nil}]
+        assert collected()==[next: 42, next: 42, compl: nil]
         Agent.stop(:retry)
     end
 
@@ -612,7 +612,7 @@ defmodule DrepelTest do
         |> retry(3)
         |> collector
         Drepel.run()
-        assert collected()==[{:err, "err"}]
+        assert collected()==[err: "err"]
     end
 
     @tag orderSensitive: true
@@ -621,7 +621,37 @@ defmodule DrepelTest do
         |> take(7)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, "0 0"}, {:next, "0 1"}, {:next, "1 1"}, {:next, "1 2"}, {:next, "2 2"}, {:next, "2 3"}, {:next, "3 3"}, {:compl, nil}]
+        assert collected()==[next: "0 0", next: "0 1", next: "1 1", next: "1 2", next: "2 2", next: "2 3", next: "3 3", compl: nil]
+    end
+
+    @doc """ 
+        0     1     2     3     4     5...
+        0     1     2     3     4     5...
+        |     |     |     |     |     |
+        0     1     4     9     16    20...
+    """
+    @tag orderSensitive: true
+    test "join_1" do
+        join(interval(50), interval(50), 0, 0, fn v1, v2 -> v1*v2 end)
+        |> take(10)
+        |> collector
+        Drepel.run()
+        assert collected()==[next: 0, next: 1, next: 4, next: 9, next: 16, next: 25, next: 36, next: 49, next: 64, next: 81, compl: nil]
+    end
+    
+    @doc """ 
+        0--0  1--1  2--2  3--3  4--4  5--5...
+           0--0  1--1  2--2  3--3  4--4  5...
+           |  |  |  |  |  |  |  |  |  |  |  
+           0  0  1  2  4  6  9  12 16 20 25...
+    """
+    @tag orderSensitive: true
+    test "join_2" do
+        join(interval(50) |> delay(25), interval(50), 25, 25, fn v1, v2 -> v1*v2 end)
+        |> take(10)
+        |> collector
+        Drepel.run()
+        assert collected()==[next: 0, next: 0, next: 1, next: 2, next: 4, next: 6, next: 9, next: 12, next: 16, next: 20, compl: nil]
     end
 
     test "startWith" do
@@ -629,7 +659,7 @@ defmodule DrepelTest do
         |> startWith(0)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+        assert collected()==[next: 0, next: 1, next: 2, next: 3, compl: nil]
     end
 
     test "every" do
@@ -637,7 +667,7 @@ defmodule DrepelTest do
         |> every(fn el -> el<10 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, true}, {:compl, nil}]
+        assert collected()==[next: true, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -645,7 +675,7 @@ defmodule DrepelTest do
         amb([from([1,2,3]), from([4,5,6]) |> delay(50), from([7,8,9]) |> delay(100)])
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:next, 3}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
     end
 
     test "contains_1" do
@@ -653,7 +683,7 @@ defmodule DrepelTest do
         |> contains(8)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, true}, {:compl, nil}]
+        assert collected()==[next: true, compl: nil]
     end
 
     test "contains_2" do
@@ -661,7 +691,7 @@ defmodule DrepelTest do
         |> contains(30)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, false}, {:compl, nil}]
+        assert collected()==[next: false, compl: nil]
     end
 
     test "contains_3" do
@@ -669,7 +699,7 @@ defmodule DrepelTest do
         |> contains(8)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, false}, {:err, "err"}]
+        assert collected()==[next: false, err: "err"]
     end
 
     test "contains_4" do
@@ -677,7 +707,7 @@ defmodule DrepelTest do
         |> contains(2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, true}, {:compl, nil}]
+        assert collected()==[next: true, compl: nil]
     end
 
     test "defaultIfEmpty_1" do
@@ -685,7 +715,7 @@ defmodule DrepelTest do
         |> defaultIfEmpty(42)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, compl: nil]
     end
 
     test "defaultIfEmpty_2" do
@@ -694,28 +724,28 @@ defmodule DrepelTest do
         |> defaultIfEmpty(42)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 42}, {:compl, nil}]
+        assert collected()==[next: 42, compl: nil]
     end
 
     test "sequenceEqual_1" do
         sequenceEqual([range(1..3), range(1..3) |> delay(50), range(1..3) |> delay(100)])
         |> collector
         Drepel.run()
-        assert collected()==[{:next, true}, {:compl, nil}]
+        assert collected()==[next: true, compl: nil]
     end
 
     test "sequenceEqual_2" do
         sequenceEqual([range(1..3), range(1..3) |> delay(50), range(1..4) |> delay(100)])
         |> collector
         Drepel.run()
-        assert collected()==[{:next, false}, {:compl, nil}]
+        assert collected()==[next: false, compl: nil]
     end
 
     test "sequenceEqual_3" do
         sequenceEqual([range(1..3), range(2..4) |> delay(50), range(1..3) |> delay(100)])
         |> collector
         Drepel.run()
-        assert collected()==[{:next, false}, {:compl, nil}]
+        assert collected()==[next: false, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -725,7 +755,7 @@ defmodule DrepelTest do
         |> take(3)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 2}, {:next, 3}, {:next, 4}, {:compl, nil}]
+        assert collected()==[next: 2, next: 3, next: 4, compl: nil]
     end
 
     test "skipWhile" do
@@ -733,7 +763,7 @@ defmodule DrepelTest do
         |> skipWhile(fn el -> el != 3 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 3}, {:next, 4}, {:next, 5}, {:compl, nil}]
+        assert collected()==[next: 3, next: 4, next: 5, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -742,7 +772,7 @@ defmodule DrepelTest do
         |> takeUntil(timer(120))
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 0}, {:next, 1}, {:compl, nil}]
+        assert collected()==[next: 0, next: 1, compl: nil]
     end
 
     @tag orderSensitive: true
@@ -751,7 +781,7 @@ defmodule DrepelTest do
         |> takeUntil(timer(100, 42))
         |> collector
         Drepel.run()
-        assert collected()==[{:compl, nil}]
+        assert collected()==[compl: nil]
     end
 
     test "takeWhile_1" do
@@ -759,7 +789,7 @@ defmodule DrepelTest do
         |> takeWhile(fn el -> el != 3 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 1, next: 2, compl: nil]
     end
 
     test "takeWhile_2" do
@@ -767,7 +797,7 @@ defmodule DrepelTest do
         |> takeWhile(fn el -> el != 3 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:compl, nil}]
+        assert collected()==[compl: nil]
     end
 
     test "max" do
@@ -775,7 +805,7 @@ defmodule DrepelTest do
         |> max()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 3}, {:compl, nil}]
+        assert collected()==[next: 3, compl: nil]
     end
 
     test "min" do
@@ -783,7 +813,7 @@ defmodule DrepelTest do
         |> min()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:compl, nil}]
+        assert collected()==[next: 1, compl: nil]
     end
 
     test "maxBy" do
@@ -791,7 +821,7 @@ defmodule DrepelTest do
         |> maxBy(fn {_, v} -> v end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, [{"c", 3}, {"a", 3}]}, {:compl, nil}]
+        assert collected()==[next: [{"c", 3}, {"a", 3}], compl: nil]
     end
 
     test "minBy" do
@@ -799,7 +829,7 @@ defmodule DrepelTest do
         |> minBy(fn {_, v} -> v end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, [{"a", 1}, {"c", 1}]}, {:compl, nil}]
+        assert collected()==[next: [{"a", 1}, {"c", 1}], compl: nil]
     end
 
     test "average_1" do
@@ -807,7 +837,7 @@ defmodule DrepelTest do
         |> average()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 2.0}, {:compl, nil}]
+        assert collected()==[next: 2.0, compl: nil]
     end
 
     test "average_2" do
@@ -815,7 +845,7 @@ defmodule DrepelTest do
         |> average()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 2.0}, {:compl, nil}]
+        assert collected()==[next: 2.0, compl: nil]
     end
 
     test "count" do
@@ -823,7 +853,7 @@ defmodule DrepelTest do
         |> count(fn el -> el>10 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 3}, {:compl, nil}]
+        assert collected()==[next: 3, compl: nil]
     end
 
     test "sum" do
@@ -831,7 +861,7 @@ defmodule DrepelTest do
         |> sum()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 15}, {:compl, nil}]
+        assert collected()==[next: 15, compl: nil]
     end
 
      test "concat" do
@@ -840,7 +870,7 @@ defmodule DrepelTest do
         concat(o1, o2)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, 1}, {:next, 1}, {:next, 1}, {:next, 2}, {:next, 2}, {:compl, nil}]
+        assert collected()==[next: 1, next: 1, next: 1, next: 2, next: 2, compl: nil]
     end
 
     test "groupBy" do
@@ -865,7 +895,7 @@ defmodule DrepelTest do
         |> toArray()
         |> collector
         Drepel.run()
-        assert collected()==[{:next, [1,2,3]}, {:compl, nil}]
+        assert collected()==[next: [1,2,3], compl: nil]
     end
 
     test "toMap" do
@@ -873,7 +903,7 @@ defmodule DrepelTest do
         |> toMap(fn el -> el+1 end)
         |> collector
         Drepel.run()
-        assert collected()==[{:next, %{ 2 => 1, 3 => 2, 4 => 3 }}, {:compl, nil}]
+        assert collected()==[next: %{ 2 => 1, 3 => 2, 4 => 3 }, compl: nil]
     end
     
 end
