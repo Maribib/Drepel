@@ -1,135 +1,98 @@
 
 defmodule DNode do
-    @enforce_keys [:id]
-    defstruct [ :id, parents: [], children: [], runFct: &Drepel.doNothing/1, 
-    initState: &Drepel.Env.nilState/0, state: nil, isSink: false, timestamp: 0, 
-    reorderer: nil, endedChildren: [] ]
+    @enforce_keys [:id, :fct, :onReceive, :args, :buffs]
+    defstruct [ :id, :fct, :onReceive, :args, :dependencies, :buffs,
+    parents: [], children: [], startReceived: 0 ]
 
     use GenServer, restart: :transient
 
     # Client API
 
     def start_link(_opts, aDNode) do
-        GenServer.start_link(__MODULE__, aDNode, name: aDNode.id)
+        {id, _node} = aDNode.id
+        GenServer.start_link(__MODULE__, aDNode, name: id)
     end
 
-    def onNext(id, sender, value, timestamp) do
-        GenServer.cast(id, {:onNext, sender, value, timestamp})
+    def propagate(id, source, sender, value) do
+        GenServer.cast(id, {:propagate, source, sender, value})
     end
 
-    def onCompleted(id, sender, timestamp) do
-        GenServer.cast(id, {:onCompleted, sender, timestamp})
+    def propagateDefault(id, sender, value) do
+        GenServer.cast(id, {:propagateDefault, sender, value})
     end
 
-    def onError(id, sender, err, timestamp) do
-        GenServer.cast(id, {:onError, sender, err, timestamp})
+    def map(aDNode, source, _sender, value) do
+        #IO.puts "map #{inspect aDNode.id} #{inspect value}"
+        res = aDNode.fct.(value)
+        Enum.map(aDNode.children, &DNode.propagate(&1, source, aDNode.id, res))
+        aDNode
     end
 
-    def onScheduled(id, name, timestamp) do
-        GenServer.cast(id, {:onScheduled, name, timestamp})
-    end
-    
-    def runSource(id) do
-        GenServer.cast(id, {:runSource})
-    end
-
-    def updateChildren(id, children) do
-        GenServer.call(id, {:updateChildren, children})
+    def latest(aDNode, source, sender, value) do
+        #IO.puts "latest #{inspect aDNode.id} #{inspect value}"
+        aDNode = %{ aDNode | args: %{ aDNode.args | sender => value } }
+        args = Enum.map(aDNode.parents, &Map.get(aDNode.args, &1))
+        res = apply(aDNode.fct, args)
+        Enum.map(aDNode.children, &DNode.propagate(&1, source, aDNode.id, res))
+        aDNode
     end
 
-    def childTerminate(id, childId) do
-        GenServer.cast(id, {:childTerminate, childId})
+    def checkDeps(aDNode, source, sender, value) do
+        #IO.puts "checkDeps #{inspect aDNode.id} #{inspect value}"
+        aDNode = update_in(aDNode.buffs[source][sender], &(:queue.in(value, &1)))
+        ready = Enum.reduce_while(aDNode.buffs[source], true, fn {_, queue}, acc ->
+            empty = :queue.is_empty(queue)
+            { empty && :halt || :cont, acc && !empty }
+        end)
+        if ready do
+            aDNode = Enum.reduce(aDNode.buffs[source], aDNode, fn {parentId, queue}, aDNode ->
+                {{:value, value}, queue} = :queue.out(queue)
+                %{ aDNode |
+                    buffs: %{ aDNode.buffs | source => Map.put(aDNode.buffs[source], parentId, queue) },
+                    args: Map.put(aDNode.args, parentId, value)
+                }
+            end)
+            args = Enum.map(aDNode.parents, &Map.get(aDNode.args, &1))
+            res = apply(aDNode.fct, args)
+            Enum.map(aDNode.children, &DNode.propagate(&1, source, aDNode.id, res))
+            aDNode
+        else
+            aDNode
+        end
     end
 
     # Server API
 
-    def init(%DNode{}=aDNode) do
-        Process.flag(:trap_exit, true)
-        { :ok, %{ aDNode | state: aDNode.initState.(aDNode) } }
+    def init(%__MODULE__{}=aDNode) do
+        { :ok, aDNode }
     end
 
-    def terminate(reason, aDNode) do
-        Enum.map(aDNode.parents, fn id -> childTerminate(id, aDNode.id) end)
-        if !is_nil(aDNode.reorderer) do
-            childTerminate(aDNode.reorderer, aDNode.id)
-        end
-        reason
+    def handle_cast({:propagate, source, sender, value}, aDNode) do 
+        { :noreply, aDNode.onReceive.(aDNode, source, sender, value) }
     end
 
-    def handle_cast({:onNext, sender, value, timestamp}, aDNode) do
-        aDNode = %{ aDNode | timestamp: timestamp }
-        aDNode = case aDNode.runFct do
-            %{onNextSink: nextFct} -> 
-                nextFct.(value)
-                aDNode
-            %{onNext: nextFct} -> nextFct.(aDNode, sender, value, timestamp)
+    def handle_cast({:propagateDefault, sender, parentDefault}, aDNode) do 
+        #IO.puts "propagateDefault #{inspect aDNode.id} #{inspect sender}"
+        aDNode = %{ aDNode | args: %{ aDNode.args | sender => parentDefault } }
+        if Enum.count(aDNode.args, fn {_, arg} -> arg==%Sentinel{} end)==0 do
+            if length(aDNode.children)>0 do
+                default = apply(aDNode.fct, Enum.map(aDNode.parents, &Map.get(aDNode.args, &1)))
+                Enum.map(aDNode.children, &DNode.propagateDefault(&1, aDNode.id, default))
+            else
+                apply(aDNode.fct, Enum.map(aDNode.parents, &Map.get(aDNode.args, &1)))
+                Enum.map(aDNode.parents, &send(&1, :start))
+            end
         end
-        {:noreply, aDNode}
+        { :noreply, aDNode}
     end
 
-    def handle_cast({:onCompleted, sender, timestamp}, aDNode) do
-        #IO.puts "\n#{aDNode.id} onCompleted"
-        aDNode = %{ aDNode | timestamp: timestamp }
-        aDNode = case aDNode.runFct do
-            %{onCompletedSink: complFct} -> 
-                complFct.()
-                aDNode
-            %{onCompleted: complFct} -> complFct.(aDNode, sender, timestamp)
-            _ -> 
-                Drepel.onCompleted(aDNode) # propagate
-                aDNode
+    def handle_info(:start, aDNode) do
+        #IO.puts "start #{inspect aDNode.id} "
+        aDNode = %{ aDNode | startReceived: aDNode.startReceived+1 }
+        if length(aDNode.children)==aDNode.startReceived do
+            Enum.map(aDNode.parents, &send(&1, :start))
         end
-        if aDNode.isSink do
-            Manager.normalExit(self())
-        end
-        {:noreply, aDNode}
-    end
-
-    def handle_cast({:onError, sender, err, timestamp}, aDNode) do
-        aDNode = %{ aDNode | timestamp: timestamp }
-        #IO.puts "\nonError"
-        aDNode = case aDNode.runFct do
-            %{onErrorSink: errFct} -> 
-                errFct.(err)
-                aDNode
-            %{onError: errFct} -> errFct.(aDNode, sender, err, timestamp)
-            _ -> 
-                Drepel.onError(aDNode, err) # propagate
-                aDNode
-        end
-        if aDNode.isSink do
-            Manager.normalExit(self())
-        end
-        {:noreply, aDNode}
-    end
-
-    def handle_cast({:onScheduled, name, timestamp}, aDNode) do
-        aDNode = %{ aDNode | timestamp: timestamp }
-        aDNode = case aDNode.runFct do
-            %{onScheduled: schedFct} -> schedFct.(aDNode, name, timestamp)
-            _ -> aDNode
-        end
-        {:noreply, aDNode}
-    end
-
-    def handle_cast({:runSource}, aDNode) do
-        aDNode = case aDNode.runFct do
-            %{onNext: nextFct} -> nextFct.(aDNode)
-            _ -> aDNode.runFct.(aDNode)
-        end
-        {:noreply, aDNode}
-    end
-
-    def handle_cast({:childTerminate, childId}, aDNode) do
-        endedChildren = aDNode.endedChildren ++ [childId]
-        if length(aDNode.children -- endedChildren)==0 do
-            Manager.normalExit(self())
-        end
-        {:noreply, %{ aDNode | endedChildren: endedChildren } }
-    end
-
-    def handle_call({:updateChildren, children}, _from, aDNode) do
-        {:reply, :ok, %{ aDNode | children: children } }
-    end
+        { :noreply, aDNode }
+    end 
 
 end

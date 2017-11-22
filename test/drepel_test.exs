@@ -1,910 +1,106 @@
 defmodule DrepelTest do
     use ExUnit.Case
-    use Drepel
-    doctest Drepel
 
-    def collect(stream, val \\ nil) do
-        Agent.update(__MODULE__, &( &1 ++ [{ stream, val }] ))
-    end
-
-    def collected do
-        Agent.get(__MODULE__, &(&1))
-    end
-
-    def collector(parent) do
-        parent |> subscribe(&DrepelTest.collect(:next, &1), &DrepelTest.collect(:err, &1), fn -> DrepelTest.collect(:compl) end)
-    end
-
-    setup_all do 
-        Agent.start_link(fn -> [] end, name: unquote(__MODULE__))
-        :ok
-    end
-
-    setup context do
-        Agent.update(__MODULE__, fn _ -> [] end)
-        use Drepel, orderSensitive: Map.has_key?(context, :orderSensitive)
-        :ok
-    end
-
-    test "create 1source-1sub" do
-        create(fn nod ->
-            onNext(nod, 42)
-            onNext(nod, 41)
-            onCompleted(nod)
-        end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, next: 41, compl: nil]
-    end
-
-    test "create 1source-2sub" do
-        subFct = fn tag ->
-            [ fn val -> 
-                Agent.update(__MODULE__, &( &1 ++ [{ :next, tag, val }] ))
-            end, 
-            fn err -> 
-                Agent.update(__MODULE__, &( &1 ++ [{ :err, tag, err }] ))
-            end, 
-            fn ->
-                Agent.update(__MODULE__, &( &1 ++ [{ :compl, tag, nil }] ))
-            end ]
-        end
-
-        n = create(fn nod ->
-            onNext(nod, 42)
-            onNext(nod, 41)
-            onCompleted(nod)
-        end)
-        apply(&subscribe/4, [n] ++ subFct.(:c1))
-        apply(&subscribe/4, [n] ++ subFct.(:c2))
-        Drepel.run()
-        res = collected()
-        assert Enum.filter(res, fn {_stream, tag, _val} -> tag==:c1 end)==[{:next, :c1, 42}, {:next, :c1, 41}, {:compl, :c1, nil}]
-        assert Enum.filter(res, fn {_stream, tag, _val} -> tag==:c2 end)==[{:next, :c2, 42}, {:next, :c2, 41}, {:compl, :c2, nil}]
-    end
-
-    test "just" do
-        just("plop")
-        |> collector
-        Drepel.run()
-        assert collected()==[next: "plop", compl: nil]
-    end
-
-    test "start" do
-        start(fn -> "res" end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: "res", compl: nil]
-    end
-
-    test "repeat" do
-        repeat(100, 3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 100, next: 100, next: 100, compl: nil]
-    end
-
-    test "range_1" do
-        range(1..3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
-    end
-
-    test "range_2" do
-        range(1, 3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
-    end
-
-    test "from_1" do
-        from(["a", "b", "c"])
-        |> collector
-        Drepel.run()
-        assert collected()==[next: "a", next: "b", next: "c", compl: nil]
-    end
-
-    test "from_2" do
-        from("bar")
-        |> collector
-        Drepel.run()
-        assert collected()==[next: "b", next: "a", next: "r", compl: nil]
-    end
-
-    test "from_3" do
-        from(1, 2, 3, 4)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, next: 3, next: 4, compl: nil]
-    end
-
-    test "timer" do
-        timer(200, 42)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, compl: nil]
-    end
-
-    test "interval" do
-        interval(50)
-        |> take(3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 1, next: 2, compl: nil]
-    end
-
-    test "map" do
-        range(0..3)
-        |> map(fn el -> el*10 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 10, next: 20, next: 30, compl: nil]
-    end
-
-    test "flatmap" do
-        range(1, 2)
-        |> flatmap(fn el ->
-            range(el, 2)
-        end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, next: 2, compl: nil]
-    end
-
-    test "scan" do
-        range(1..4)
-        |> scan(fn val, acc -> val+acc end, 0)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 3, next: 6, next: 10, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "window" do
-        interval(25)
-        |> take(20)
-        |> window(100)
-        |> subscribe(fn window, wid ->
-            window |> sum() |> map(fn el -> {wid, el} end) |> collector
-        end)
-        Drepel.run()
-        compls = Enum.filter(collected(), fn {tag, _val} -> tag==:compl end)
-        assert length(compls)==6
-        vals = collected() |> Enum.filter(fn {tag, _val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
-        assert Map.get(vals, 0)==0+1+2+3
-        assert Map.get(vals, 1)==4+5+6+7
-        assert Map.get(vals, 2)==8+9+10+11
-        assert Map.get(vals, 3)==12+13+14+15
-        assert Map.get(vals, 4)==16+17+18+19
-        assert Map.get(vals, 5)==0
-    end
-
-    test "windowWithCount" do
-        range(1..20)
-        |> windowWithCount(4)
-        |> subscribe(fn window, wid ->
-            window |> sum() |> map(fn el -> {wid, el} end) |> collector
-        end)
-        Drepel.run()
-        compls = Enum.filter(collected(), fn {tag, _val} -> tag==:compl end)
-        assert length(compls)==5
-        vals = collected() |> Enum.filter(fn {tag, _val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
-        assert Map.get(vals, 0)==1+2+3+4
-        assert Map.get(vals, 1)==5+6+7+8
-        assert Map.get(vals, 2)==9+10+11+12
-        assert Map.get(vals, 3)==13+14+15+16
-        assert Map.get(vals, 4)==17+18+19+20
-    end
-
-    @tag orderSensitive: true
-    test "slidingWindow" do
-        interval(25)
-        |> take(20)
-        |> slidingWindow(50, 100)
-        |> subscribe(fn window, wid ->
-            window |> sum() |> map(fn el -> {wid, el} end) |> collector
-        end)
-        Drepel.run()
-        compls = Enum.filter(collected(), fn {tag, _val} -> tag==:compl end)
-        assert length(compls)==11
-        vals = collected() |> Enum.filter(fn {tag, _val} -> tag==:next end) |> Enum.reduce(%{}, fn {:next, {k, val}}, acc -> Map.put(acc, k, val) end)
-        assert Map.get(vals, 0)==0+1+2+3
-        assert Map.get(vals, 1)==2+3+4+5
-        assert Map.get(vals, 2)==4+5+6+7
-        assert Map.get(vals, 3)==6+7+8+9
-        assert Map.get(vals, 4)==8+9+10+11
-        assert Map.get(vals, 5)==10+11+12+13
-        assert Map.get(vals, 6)==12+13+14+15
-        assert Map.get(vals, 7)==14+15+16+17
-        assert Map.get(vals, 8)==16+17+18+19
-        assert Map.get(vals, 9)==18+19
-        assert Map.get(vals, 10)==0
-    end
-    
-    @tag orderSensitive: true
-    test "buffer" do
-        interval(25)
-        |> buffer(interval(100))
-        |> take(2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: [0, 1, 2, 3], next: [4, 5, 6, 7], compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "bufferBoundaries" do
-        interval(25)
-        |> bufferBoundaries(interval(100))
-        |> take(2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: [4, 5, 6, 7], next: [8, 9, 10, 11], compl: nil]
-    end
-
-    # TODO bufferSwitch
-
-    # TODO bufferWithCount
-
-    test "delay" do
-        from(10)
-        |> delay(200)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 10, compl: nil]
-    end
-
-    test "tap_1" do
-        Agent.start_link(fn -> [] end, name: :tap)
-        range(1..2)
-        |> tap(fn val -> Agent.update(:tap, &(&1 ++ [val])) end, fn err -> Agent.update(:tap, &(&1 ++ [err])) end, fn -> Agent.update(:tap, &(&1 ++ [:compl])) end)
-        |> collector
-        Drepel.run()
-        assert Agent.get(:tap, &(&1))==[1, 2, :compl]
-        assert collected()==[next: 1, next: 2, compl: nil]
-        Agent.stop(:tap)
-    end
-
-    test "tap_2" do
-        Agent.start_link(fn -> [] end, name: :tap)
-        range(1..2)
-        |> tapOnNext(fn val -> Agent.update(:tap, &(&1 ++ [val])) end)
-        |> tapOnError(fn err -> Agent.update(:tap, &(&1 ++ [err])) end)
-        |> tapOnCompleted(fn -> Agent.update(:tap, &(&1 ++ [:compl])) end)
-        |> collector
-        Drepel.run()
-        assert Agent.get(:tap, &(&1))==[1, 2, :compl]
-        assert collected()==[next: 1, next: 2, compl: nil]
-        Agent.stop(:tap)
-    end
-
-    test "materialize" do
-        just(42)
-        |> materialize()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: {&onNext/2, 42}, next: {&onCompleted/1, nil}, compl: nil]
-    end
-
-    test "dematerialize_1" do
-        from([{&onNext/2, 42}, {&onCompleted/1, nil}])
-        |> dematerialize()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, compl: nil]
-    end
-
-    test "dematerialize_2" do
-        just(42)
-        |> dematerialize()
-        |> collector
-        Drepel.run()
-        assert collected()==[{:err, "Elements must be be valid materialized value."}]
-    end
-
-    test "materialize/dematerialize" do
-        range(1..3)
-        |> materialize()
-        |> dematerialize()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
-    end
-
-    test "timeInterval" do
-        interval(50)
-        |> timeInterval()
-        |> collector
-        Drepel.run(450)
-        average = Enum.reduce(collected(), 0, fn { :next, %{ interval: interval }}, acc -> acc+interval end)/length(collected())
-        assert average-50<5
-    end
-
-    @tag orderSensitive: true
-    test "timeout_1" do
-        interval(50)
-        |> take(4)
-        |> timeout(50)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 1, next: 2, next: 3, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "timeout_2" do
-        n1 = interval(50)
-        |> take(3)
-        n2 = timer(201, 3)
-        merge([n1, n2])
-        |> timeout(50, "err")
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 1, next: 2, err: "err"]
-    end
-
-    test "reduce" do
-        from([1, 2, 3, 4, 5])
-        |> reduce(fn v, acc -> v+acc end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 15, compl: nil]
-    end
-
-    test "skip" do
-        range(0..4)
-        |> skip(3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 3, next: 4, compl: nil]
-    end
-
-    test "skipLast" do
-        range(1..4)
-        |> skipLast(2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, compl: nil]
-    end
-
-    test "ignoreElements" do
-        range(0..4)
-        |> ignoreElements()
-        |> collector
-        Drepel.run()
-        assert collected()==[compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "sample" do
-        interval(30)
-        |> sample(100)
-        |> take(2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 2, next: 5, compl: nil]
-    end
-
-    test "elementAt_1" do
-        range(0..4)
-        |> elementAt(2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 2, compl: nil]
-    end
-
-    test "elementAt_2" do
-        range(0..1)
-        |> elementAt(2)
-        |> collector
-        Drepel.run()
-        assert collected()==[err: "Argument out of range"]
-    end
-
-    test "distinct" do
-        from([1, 2, 2, 1, 3])
-        |> distinct()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
-    end
-
-    test "filter" do
-        from([2, 30, 22, 5, 60, 1])
-        |> filter(fn el -> el>10 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 30, next: 22, next: 60, compl: nil]
-    end
-
-    test "first_1" do
-        from([2, 30, 22, 5, 60, 1])
-        |> first()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 2, compl: nil]
-    end
-
-    test "first_2" do
-        from([2, 30, 22, 5, 60, 1])
-        |> first(fn el -> el>10 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 30, compl: nil]
-    end
-
-    test "first_3" do
-        from([2, 30, 22, 5, 60, 1])
-        |> first(fn el -> el>100 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[err: "Any element match condition."]
-    end
-
-    test "last_1" do
-        from([2, 30, 22, 5, 60, 1])
-        |> last()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, compl: nil]
-    end
-
-    test "last_2" do
-        from([2, 30, 22, 5, 60, 1])
-        |> last(fn el -> el>10 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 60, compl: nil]
-    end
-
-    test "last_3" do
-        from([2, 5, 1])
-        |> last(fn el -> el>10 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[err: "Any element match condition."]
-    end
-
-    @tag orderSensitive: true
-    test "debounce" do
-        from([
-            %{value: 0, time: 100},
-            %{value: 1, time: 600},
-            %{value: 2, time: 400},
-            %{value: 3, time: 700},
-            %{value: 4, time: 200}
-        ])
-        |> flatmap(fn item ->
-            from(item.value)
-            |> delay(item.time)
-        end)
-        |> debounce(500)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 2, next: 4, compl: nil]
-    end
-
-    test "take" do
-        range(0, 5)
-        |> take(3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 1, next: 2, compl: nil]
-    end
-
-    test "takeLast" do
-        range(0, 5)
-        |> takeLast(3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 3, next: 4, next: 5, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "merge_1" do
-        n1 = from([
-            %{value: 20, time: 30},
-            %{value: 40, time: 30},
-            %{value: 60, time: 30},
-            %{value: 80, time: 30},
-            %{value: 100, time: 30}
-        ]) |> flatmap(fn item ->
-            from(item.value)
-            |> delay(item.time)
-        end)
-        n2 = from([
-            %{value: 1, time: 105},
-            %{value: 1, time: 160}
-        ])
-        |> flatmap(fn item ->
-            from(item.value)
-            |> delay(item.time)
-        end)
-
-        merge(n1, n2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 20, next: 40, next: 60, next: 1, next: 80, next: 100, next: 1, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "merge_2" do
-        n1 = Drepel.throw("err1")
-        |> delay(25)
-        n2 = Drepel.throw("err2")
-        |> delay(50)
-        n3 = just(42)
-
-        merge([n1, n2, n3])
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, err: ["err1", "err2"]]
-    end
-
-    test "zip" do
-        n1 = from([
-            %{time: 0, value: 1},
-            %{time: 30, value: 2},
-            %{time: 60, value: 3},
-            %{time: 5, value: 4},
-            %{time: 10, value: 5}
-        ]) |> flatmap(fn el ->
-            from(el.value) |> delay(el.time)
-        end)
-        n2= from([
-            %{time: 15, value: "A"},
-            %{time: 20, value: "B"},
-            %{time: 30, value: "C"},
-            %{time: 3, value: "D"}
-        ]) |> flatmap(fn el ->
-            from(el.value) |> delay(el.time)
-        end)
-        zip(n1, n2, fn v1, v2 ->
-            "#{v1}#{v2}"
-        end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: "1A", next: "2B", next: "3C", next: "4D", compl: nil]
-    end
-
-    test "catch_1" do
-        create(fn nod ->
-            onNext(nod, 42)
-            onError(nod, "err")
-        end)
-        |> dcatch(fn -> 
-            just(3) 
-        end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, next: 3, compl: nil]
-    end
-
-    test "catch_2" do
-        create(fn nod ->
-            onNext(nod, 42)
-            onError(nod, "err")
-        end)
-        |> dcatch(fn ->
-            Drepel.throw("err2")
-        end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, err: "err2"]
-    end
-
-    test "retry_1" do
-        Agent.start_link(fn -> [{&onNext/2, [42]}, {&onError/2, ["err"]}, {&onNext/2, [42]}, {&onCompleted/1, []}, ] end, name: :retry)
-        create(fn nod ->
-            actions = Agent.get_and_update(:retry, fn state ->
-                { Enum.slice(state, 0..1), Enum.slice(state, 2..length(state)) }
-            end)
-            Enum.map(actions, fn {fct, args} -> apply(fct, [nod]++args) end)
-        end)
-        |> retry()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, next: 42, compl: nil]
-        Agent.stop(:retry)
-    end
-
-    test "retry_2" do
-        Drepel.throw("err")
-        |> retry(3)
-        |> collector
-        Drepel.run()
-        assert collected()==[err: "err"]
-    end
-
-    @tag orderSensitive: true
-    test "combineLatest" do
-        combineLatest(interval(50) |> delay(25), interval(50), fn v1, v2 -> "#{v1} #{v2}" end)
-        |> take(7)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: "0 0", next: "0 1", next: "1 1", next: "1 2", next: "2 2", next: "2 3", next: "3 3", compl: nil]
-    end
-
-    @doc """ 
-        0     1     2     3     4     5...
-        0     1     2     3     4     5...
-        |     |     |     |     |     |
-        0     1     4     9     16    20...
+    @doc """
+      s
+     / \
+    l1 l2
+     \ / 
+      t
     """
-    @tag orderSensitive: true
-    test "join_1" do
-        join(interval(50), interval(50), 0, 0, fn v1, v2 -> v1*v2 end)
-        |> take(10)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 1, next: 4, next: 9, next: 16, next: 25, next: 36, next: 49, next: 64, next: 81, compl: nil]
-    end
-    
-    @doc """ 
-        0--0  1--1  2--2  3--3  4--4  5--5...
-           0--0  1--1  2--2  3--3  4--4  5...
-           |  |  |  |  |  |  |  |  |  |  |  
-           0  0  1  2  4  6  9  12 16 20 25...
-    """
-    @tag orderSensitive: true
-    test "join_2" do
-        join(interval(50) |> delay(25), interval(50), 25, 25, fn v1, v2 -> v1*v2 end)
-        |> take(10)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 0, next: 1, next: 2, next: 4, next: 6, next: 9, next: 12, next: 16, next: 20, compl: nil]
-    end
-
-    test "startWith" do
-        from([1, 2, 3])
-        |> startWith(0)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 1, next: 2, next: 3, compl: nil]
-    end
-
-    test "every" do
-        range(1..5)
-        |> every(fn el -> el<10 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: true, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "amb" do
-        amb([from([1,2,3]), from([4,5,6]) |> delay(50), from([7,8,9]) |> delay(100)])
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, next: 3, compl: nil]
-    end
-
-    test "contains_1" do
-        range(1..10)
-        |> contains(8)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: true, compl: nil]
-    end
-
-    test "contains_2" do
-        range(1..10)
-        |> contains(30)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: false, compl: nil]
-    end
-
-    test "contains_3" do
-        Drepel.throw("err")
-        |> contains(8)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: false, err: "err"]
-    end
-
-    test "contains_4" do
-        from([1,2,2,3])
-        |> contains(2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: true, compl: nil]
-    end
-
-    test "defaultIfEmpty_1" do
-        range(1..2)
-        |> defaultIfEmpty(42)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, compl: nil]
-    end
-
-    test "defaultIfEmpty_2" do
-        empty()
-        |> delay(100)
-        |> defaultIfEmpty(42)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 42, compl: nil]
-    end
-
-    test "sequenceEqual_1" do
-        sequenceEqual([range(1..3), range(1..3) |> delay(50), range(1..3) |> delay(100)])
-        |> collector
-        Drepel.run()
-        assert collected()==[next: true, compl: nil]
-    end
-
-    test "sequenceEqual_2" do
-        sequenceEqual([range(1..3), range(1..3) |> delay(50), range(1..4) |> delay(100)])
-        |> collector
-        Drepel.run()
-        assert collected()==[next: false, compl: nil]
-    end
-
-    test "sequenceEqual_3" do
-        sequenceEqual([range(1..3), range(2..4) |> delay(50), range(1..3) |> delay(100)])
-        |> collector
-        Drepel.run()
-        assert collected()==[next: false, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "skipUntil" do
-        interval(50)
-        |> skipUntil(timer(120))
-        |> take(3)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 2, next: 3, next: 4, compl: nil]
-    end
-
-    test "skipWhile" do
-        range(1..5)
-        |> skipWhile(fn el -> el != 3 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 3, next: 4, next: 5, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "takeUntil_1" do
-        interval(50)
-        |> takeUntil(timer(120))
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 0, next: 1, compl: nil]
-    end
-
-    @tag orderSensitive: true
-    test "takeUntil_2" do
-        empty()
-        |> takeUntil(timer(100, 42))
-        |> collector
-        Drepel.run()
-        assert collected()==[compl: nil]
-    end
-
-    test "takeWhile_1" do
-        range(1..5)
-        |> takeWhile(fn el -> el != 3 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 2, compl: nil]
-    end
-
-    test "takeWhile_2" do
-        empty()
-        |> takeWhile(fn el -> el != 3 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[compl: nil]
-    end
-
-    test "max" do
-        from([1, 2, 3])
-        |> max()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 3, compl: nil]
-    end
-
-    test "min" do
-        from([1, 2, 3])
-        |> min()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, compl: nil]
-    end
-
-    test "maxBy" do
-        from([{"a", 1}, {"b", 2}, {"c", 3}, {"a", 3}])
-        |> maxBy(fn {_, v} -> v end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: [{"c", 3}, {"a", 3}], compl: nil]
-    end
-
-    test "minBy" do
-        from([{"a", 1}, {"b", 2}, {"c", 3}, {"a", 3}, {"c", 1}])
-        |> minBy(fn {_, v} -> v end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: [{"a", 1}, {"c", 1}], compl: nil]
-    end
-
-    test "average_1" do
-        range(1,3)
-        |> average()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 2.0, compl: nil]
-    end
-
-    test "average_2" do
-        from([1.0, 2.0, 3.0])
-        |> average()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 2.0, compl: nil]
-    end
-
-    test "count" do
-        from([2, 30, 22, 5, 60, 1])
-        |> count(fn el -> el>10 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 3, compl: nil]
-    end
-
-    test "sum" do
-        from([1, 2, 3, 4, 5])
-        |> sum()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 15, compl: nil]
-    end
-
-     test "concat" do
-        o1 = from([1, 1, 1])
-        o2 = from([2, 2])
-        concat(o1, o2)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: 1, next: 1, next: 1, next: 2, next: 2, compl: nil]
-    end
-
-    test "groupBy" do
-        from([{"a", 2}, {"b", 1}, {"c", 3}, {"a", 4}, {"b", 0}, {"c", 3} ])
-        |> groupBy(fn {k, _} -> k end, fn {_, v} -> v end)
-        |> subscribe(fn group, key ->
-            group |> max() |> map(fn val -> {key, val} end) |> collector
+    test "single_node_1" do
+        s = Drepel.Source.miliseconds(100)
+        l1 = Drepel.Signal.new(s, fn s -> s+1 end)
+        l2 = Drepel.Signal.new(s, fn s -> s-1 end)
+        Drepel.Signal.new([l1, l2], fn v1, v2 -> 
+            #IO.puts "#{inspect v1} #{inspect v2}"
+            assert v1-v2==2
         end)
-        Drepel.run()
-        res = collected()
-        values = Enum.filter(res, fn {tag, _val} -> tag == :next end)
-        m = Enum.reduce(values, %{}, fn {:next, {key, val}}, acc -> Map.put(acc, key, val) end)
-        assert Map.get(m, "a")==4
-        assert Map.get(m, "b")==1
-        assert Map.get(m, "c")==3
-        compls = Enum.filter(res, fn {tag, _val} -> tag == :compl end)
-        assert length(compls)==3
+        Drepel.run(2000)
     end
 
-    test "toArray" do
-        range(1..3)
-        |> toArray()
-        |> collector
-        Drepel.run()
-        assert collected()==[next: [1,2,3], compl: nil]
+    @doc """
+      s1   s2
+     / \   /
+    l1 l2 /
+     \ / /
+      \ /
+       t
+    """
+    test "single_node_2" do
+        s1 = Drepel.Source.miliseconds(100)
+        s2 = Drepel.Source.miliseconds(300)
+        l1 = Drepel.Signal.new(s1, fn s -> s+1 end)
+        l2 = Drepel.Signal.new(s1, fn s -> s-1 end)
+        Drepel.Signal.new([l1, l2, s2], fn v1, v2, v3 -> 
+            #IO.puts "#{v1} #{v2} #{v3}"
+            assert v1-v2==2
+        end)
+        Drepel.run(2000)
     end
 
-    test "toMap" do
-        range(1..3)
-        |> toMap(fn el -> el+1 end)
-        |> collector
-        Drepel.run()
-        assert collected()==[next: %{ 2 => 1, 3 => 2, 4 => 3 }, compl: nil]
+    @doc """
+        s1     s2
+        / \   / \
+       l1 l2 l3 l4
+        \ /   \ /
+         \__ __/
+            t
+    """
+    test "single_node_3" do
+        s1 = Drepel.Source.miliseconds(100)
+        s2 = Drepel.Source.miliseconds(300)
+        l1 = Drepel.Signal.new(s1, fn s -> s+1 end)
+        l2 = Drepel.Signal.new(s1, fn s -> s-1 end)
+        l3 = Drepel.Signal.new(s2, fn s -> s+2 end)
+        l4 = Drepel.Signal.new(s2, fn s -> s-2 end)
+        Drepel.Signal.new([l1, l2, l3, l4], fn v1, v2, v3, v4 -> 
+            #IO.puts "#{v1} #{v2} #{v3} #{v4}"
+            assert v1-v2==2
+            assert v3-v4==4
+        end)
+        Drepel.run(2000)
     end
+
+     @doc """
+        s1  s2  s3
+        / \/  \/ \
+       l1 l2  l3 l4
+        \ /    \ /
+         \__ __/
+            t
+    """
+    test "single_node_4" do
+        s1 = Drepel.Source.miliseconds(100)
+        s2 = Drepel.Source.miliseconds(200)
+        s3 = Drepel.Source.miliseconds(300)
+        l1 = Drepel.Signal.new(s1, fn s -> s+1 end)
+        l2 = Drepel.Signal.new([s1, s2], fn v1, v2 -> v1+v2 end)
+        l3 = Drepel.Signal.new([s2, s3], fn v1, v2 -> v1-v2 end)
+        l4 = Drepel.Signal.new(s3, fn s -> s-2 end)
+        Drepel.Signal.new([l1, l2, l3, l4], fn v1, v2, v3, v4 -> 
+            IO.puts "#{v1} #{v2} #{v3} #{v4}"
+        end)
+        Drepel.run(2000)
+    end
+
+
+    @doc """
+      s
+     / \
+    l1  |
+     \ / 
+      t
+    """
+    test "cluster_1" do
+        s = Drepel.Source.miliseconds(200, node: :"foo@127.0.0.1")
+        l1 = Drepel.Signal.new(s, &Distrib.inc/1, node: :"bar@127.0.0.1")
+        Drepel.Signal.new([s, l1], fn v1, v2 -> 
+            assert v1+1==v2
+        end)
+        Drepel.run(2000)
+    end
+
     
 end
  
