@@ -2,7 +2,7 @@
 defmodule DNode do
     @enforce_keys [:id, :fct, :onReceive, :args, :buffs]
     defstruct [ :id, :fct, :onReceive, :args, :dependencies, :buffs,
-    parents: [], children: [], startReceived: 0 ]
+    parents: [], children: [], startReceived: 0, state: %Sentinel{}, ]
 
     use GenServer, restart: :transient
 
@@ -26,6 +26,12 @@ defmodule DNode do
         res = aDNode.fct.(value)
         Enum.map(aDNode.children, &DNode.propagate(&1, source, aDNode.id, res))
         aDNode
+    end
+
+    def scan(aDNode, source, _sender, value) do
+        res = aDNode.fct.(value, aDNode.state)
+        Enum.map(aDNode.children, &DNode.propagate(&1, source, aDNode.id, res))
+        %{ aDNode | state: res }
     end
 
     def latest(aDNode, source, sender, value) do
@@ -64,7 +70,7 @@ defmodule DNode do
     # Server API
 
     def init(%__MODULE__{}=aDNode) do
-        { :ok, aDNode }
+        {:ok, aDNode }
     end
 
     def handle_cast({:propagate, source, sender, value}, aDNode) do 
@@ -76,7 +82,10 @@ defmodule DNode do
         aDNode = %{ aDNode | args: %{ aDNode.args | sender => parentDefault } }
         if Enum.count(aDNode.args, fn {_, arg} -> arg==%Sentinel{} end)==0 do
             if length(aDNode.children)>0 do
-                default = apply(aDNode.fct, Enum.map(aDNode.parents, &Map.get(aDNode.args, &1)))
+                default = case aDNode.state do
+                    %Sentinel{} -> apply(aDNode.fct, Enum.map(aDNode.parents, &Map.get(aDNode.args, &1)))
+                    _ -> aDNode.state
+                end
                 Enum.map(aDNode.children, &DNode.propagateDefault(&1, aDNode.id, default))
             else
                 apply(aDNode.fct, Enum.map(aDNode.parents, &Map.get(aDNode.args, &1)))

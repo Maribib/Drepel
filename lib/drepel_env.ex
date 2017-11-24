@@ -9,7 +9,11 @@ defmodule Drepel.Env do
     # Client API
 
     def start_link(_opts) do
-        GenServer.start_link(__MODULE__, %__MODULE__{}, name: __MODULE__)
+        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+    end
+
+    def reset do
+        GenServer.call(__MODULE__, :reset)
     end
 
     def createSource(refreshRate, fct, initState, default, opts) do
@@ -19,7 +23,12 @@ defmodule Drepel.Env do
 
     def createNode(parents, fct, opts) do
         nodeName = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createNode, parents, fct, nodeName})
+        GenServer.call(__MODULE__, {:createNode, parents, fct, %Sentinel{}, nodeName})
+    end
+
+    def createStatedNode(parents, fct, initState, opts) do
+        nodeName = :proplists.get_value(:node, opts, node())    
+        GenServer.call(__MODULE__, {:createNode, parents, fct, initState, nodeName})
     end
 
     def startAllNodes do
@@ -30,9 +39,12 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, :stopAllNodes)
     end
 
-    def _chooseHandler(parents, deps) do
+    def _chooseHandler(parents, deps, initState) do
         if length(parents)==1 do
-            { &DNode.map/4, nil }
+            case initState do
+                %Sentinel{} -> { &DNode.map/4, nil }
+                _ -> { &DNode.scan/4, nil }
+            end
         else
             if Enum.reduce(deps, true, fn {_source, parents}, acc -> acc && length(parents)==1 end) do
                 { &DNode.latest/4, nil }
@@ -75,8 +87,12 @@ defmodule Drepel.Env do
 
     # Server API
 
-    def init(%__MODULE__{}=env) do
-        { :ok, env }
+    def init(:ok) do
+        { :ok, %__MODULE__{} }
+    end
+
+    def handle_call(:reset, _from, _) do
+        { :reply, :ok, %__MODULE__{} }
     end
 
     def handle_call({:createSource, refreshRate, fct, initState, default, nodeName}, _from, env) do
@@ -97,18 +113,19 @@ defmodule Drepel.Env do
         {:reply, %MockDNode{id: id}, env}
     end
 
-    def handle_call({:createNode, parents, fct, nodeName}, _from, env) do
+    def handle_call({:createNode, parents, fct, initState, nodeName}, _from, env) do
         id = { String.to_atom("dnode_#{env.id}"), nodeName }
         dependencies = _computeDepedencies(env, parents)
-        {onReceive, buffs} = _chooseHandler(parents, dependencies)
+        {onReceive, buffs} = _chooseHandler(parents, dependencies, initState)
         newDNode = %DNode{ 
             id: id, 
             parents: parents, 
             fct: fct, 
-            onReceive: onReceive, 
+            onReceive: onReceive,
             args: Enum.reduce(parents, %{}, &Map.put(&2, &1, %Sentinel{})),
             dependencies: dependencies,
-            buffs: buffs
+            buffs: buffs,
+            state: initState
         }
         env = Enum.reduce(parents, env, fn (parent, env) ->
             node = Map.get(env.nodes, parent)
