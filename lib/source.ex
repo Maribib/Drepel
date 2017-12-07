@@ -1,3 +1,4 @@
+require Signal
 
 defmodule Source do 
 	@enforce_keys [ :id, :refreshRate, :fct, :state, :default ]
@@ -18,7 +19,7 @@ defmodule Source do
 	def init(%__MODULE__{}=aSource) do
 		#IO.puts "init source #{inspect aSource.id}"
 		Process.flag(:trap_exit, true)
-		Enum.map(aSource.children, &DNode.propagateDefault(&1, aSource.id, aSource.default))
+		Enum.map(aSource.children, &Signal.propagateDefault(&1, aSource.id, aSource.default))
         { :ok, aSource }
     end
 
@@ -33,7 +34,7 @@ defmodule Source do
     	#IO.puts "produce #{inspect aSource.id}"
     	ref = Process.send_after(elem(aSource.id, 0), :produce, aSource.refreshRate)
     	{ value, newState } = aSource.fct.(aSource.state)
-    	Enum.map(aSource.children, &DNode.propagate(&1, aSource.id, aSource.id, value))
+    	Enum.map(aSource.children, &Signal.propagate(&1, aSource.id, aSource.id, value))
     	{ :noreply, %{ aSource | state: newState, ref: ref } }
     end
 

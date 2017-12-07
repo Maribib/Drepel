@@ -1,6 +1,5 @@
-#require Drepel.Env
 require Drepel.Supervisor
-require MockDNode
+require MockNode
 
 defmodule Drepel do
     use Application
@@ -10,7 +9,7 @@ defmodule Drepel do
     end
 
     def stop(_state \\ nil) do
-        Drepel.Env.stopAllNodes()
+        Drepel.Env.stopNodes()
     end
 
     def resetEnv do
@@ -29,7 +28,7 @@ defmodule Drepel do
     def newSignal(parents, fct, opts) when is_list(parents) and is_function(fct) do
         if length(parents)>0 do
             if :erlang.fun_info(fct)[:arity]==length(parents) do
-                Drepel.Env.createNode(Enum.map(parents, fn %MockDNode{id: id} -> id end), fct, opts)
+                Drepel.Env.createNode(Enum.map(parents, fn %MockNode{id: id} -> id end), fct, opts)
             else
                 throw "The arity of the function must be equal to the number of parents."
             end
@@ -38,15 +37,15 @@ defmodule Drepel do
         end
     end
 
-    def newSignal(%MockDNode{}=parent, fct, opts) when is_function(fct) do
+    def newSignal(%MockNode{}=parent, fct, opts) when is_function(fct) do
         newSignal([parent], fct, opts)
     end
 
-    def map(%MockDNode{}=parent, fct, opts \\ []) when is_function(fct) do
+    def map(%MockNode{}=parent, fct, opts \\ []) when is_function(fct) do
         newSignal([parent], fct, opts)
     end
 
-    def scan(%MockDNode{id: id}, initState, fct, opts \\ []) when is_function(fct) do
+    def scan(%MockNode{id: id}, initState, fct, opts \\ []) when is_function(fct) do
         if :erlang.fun_info(fct)[:arity]==2 do
             Drepel.Env.createStatedNode([id], fct, initState, opts)
         else
@@ -54,15 +53,13 @@ defmodule Drepel do
         end
     end
 
-    def reduce(%MockDNode{}=parent, initState, fct, opts \\ []) when is_function(fct) do
+    def reduce(%MockNode{}=parent, initState, fct, opts \\ []) when is_function(fct) do
         scan(parent, initState, fct, opts)
     end
 
-    def filter(%MockDNode{}=parent, initState, condition, opts \\ []) when is_function(condition) do
+    def filter(%MockNode{}=parent, initState, condition, opts \\ []) when is_function(condition) do
         if :erlang.fun_info(condition)[:arity]==1 do
-            fct = fn new, old -> 
-                condition.(new) && new || old
-            end
+            fct = fn new, old -> condition.(new) && new || old end
             reduce(parent, initState, fct, opts)
         else
             throw "The arity of the condition function must be 1."
@@ -70,7 +67,7 @@ defmodule Drepel do
     end
 
     def run(duration \\ :inf) do
-        Drepel.Env.startAllNodes()
+        Drepel.Env.startNodes()
         Process.monitor(Drepel.Supervisor)
         res = case duration do
             :inf -> receive do
@@ -82,7 +79,7 @@ defmodule Drepel do
                 duration -> :stopped
             end
         end
-        Drepel.Env.stopAllNodes()
+        Drepel.Env.stopNodes()
         res
     end
 

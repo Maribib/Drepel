@@ -98,9 +98,8 @@ defmodule DrepelTest do
     Before lauching the tests two VM are spawned to mock remote nodes.
     Their names are :"foo@127.0.0.1" and :"bar@127.0.0.1".
     Here a source runs on node :"foo@127.0.0.1", a signal on node :"bar@127.0.0.1"
-    and signal or source with any node argument run on current node, 
-    so in the VM running the tests.
-
+    and signal or source without a node argument run on current node 
+    which is the VM running the tests.
     """
     test "cluster_1" do
         s = Drepel.miliseconds(200, node: :"foo@127.0.0.1")

@@ -1,5 +1,5 @@
-require DNode
-require MockDNode
+require Signal
+require MockNode
 
 defmodule Drepel.Env do
     defstruct [ id: 1, sources: [], nodes: %{} ]
@@ -31,26 +31,26 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, {:createNode, parents, fct, initState, nodeName})
     end
 
-    def startAllNodes do
-        GenServer.call(__MODULE__, :startAllNodes)
+    def startNodes do
+        GenServer.call(__MODULE__, :startNodes)
     end
 
-    def stopAllNodes do
-        GenServer.call(__MODULE__, :stopAllNodes)
+    def stopNodes do
+        GenServer.call(__MODULE__, :stopNodes)
     end
 
     def _chooseHandler(parents, deps, initState) do
         if length(parents)==1 do
             case initState do
-                %Sentinel{} -> { &DNode.map/4, nil }
-                _ -> { &DNode.scan/4, nil }
+                %Sentinel{} -> { &Signal.map/4, nil }
+                _ -> { &Signal.scan/4, nil }
             end
         else
             if Enum.reduce(deps, true, fn {_source, parents}, acc -> acc && length(parents)==1 end) do
-                { &DNode.latest/4, nil }
+                { &Signal.latest/4, nil }
             else
                 { 
-                    &DNode.checkDeps/4, 
+                    &Signal.checkDeps/4, 
                     Enum.reduce(deps, %{}, fn {source, parents}, acc ->
                         sourceBuffs = Enum.reduce(parents, %{}, fn parentId, acc ->
                             Map.put(acc, parentId, :queue.new()) 
@@ -110,14 +110,14 @@ defmodule Drepel.Env do
             sources: env.sources ++ [id],
             nodes: Map.put(env.nodes, id, newSource) 
         }
-        {:reply, %MockDNode{id: id}, env}
+        {:reply, %MockNode{id: id}, env}
     end
 
     def handle_call({:createNode, parents, fct, initState, nodeName}, _from, env) do
         id = { String.to_atom("dnode_#{env.id}"), nodeName }
         dependencies = _computeDepedencies(env, parents)
         {onReceive, buffs} = _chooseHandler(parents, dependencies, initState)
-        newDNode = %DNode{ 
+        newSignal = %Signal{ 
             id: id, 
             parents: parents, 
             fct: fct, 
@@ -133,23 +133,23 @@ defmodule Drepel.Env do
         end)
         env = %{ env |  
             id: env.id+1, 
-            nodes: Map.put(env.nodes, id, newDNode)
+            nodes: Map.put(env.nodes, id, newSignal)
         }
-        {:reply, %MockDNode{id: id}, env}
+        {:reply, %MockNode{id: id}, env}
     end
 
-    def handle_call(:startAllNodes, _from, env) do
-        # start all nodes
+    def handle_call(:startNodes, _from, env) do
+        # start signals
         nodes = Map.keys(env.nodes) -- env.sources
-        Enum.map(nodes, &DNode.Supervisor.start(Map.get(env.nodes, &1)))
-        # start all sources
+        Enum.map(nodes, &Signal.Supervisor.start(Map.get(env.nodes, &1)))
+        # start sources
         Enum.map(env.sources, &Source.Supervisor.start(Map.get(env.nodes, &1)))
         {:reply, :ok, env}
     end
 
-    def handle_call(:stopAllNodes, _from, env) do
+    def handle_call(:stopNodes, _from, env) do
         stopAll(Source.Supervisor, env.sources)
-        stopAll(DNode.Supervisor, Map.keys(env.nodes) -- env.sources)
+        stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources)
         {:reply, :ok, env}
     end
 

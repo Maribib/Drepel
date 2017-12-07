@@ -7,8 +7,8 @@ defmodule Node.Supervisor do
 				Enum.map(Supervisor.which_children(Source.Supervisor), fn {_, pid, _, _} ->
 					Supervisor.terminate_child(Source.Supervisor, pid)
 				end)
-				Enum.map(Supervisor.which_children(DNode.Supervisor), fn {_, pid, _, _} ->
-					Supervisor.terminate_child(DNode.Supervisor, pid)
+				Enum.map(Supervisor.which_children(Signal.Supervisor), fn {_, pid, _, _} ->
+					Supervisor.terminate_child(Signal.Supervisor, pid)
 				end)
 		end
 	end
