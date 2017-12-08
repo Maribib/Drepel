@@ -16,12 +16,22 @@ defmodule Drepel do
         Drepel.Env.reset()
     end
 
-    def miliseconds(amount, opts \\ []) do
-        Drepel.Env.createSource(amount, fn state -> {state, state+1} end, 1, 0, opts)
+    def customSource(rate, default, fct, opts \\ []) when is_integer(rate) do
+        Drepel.Env.createSource(rate, fn state -> { fct.(), state} end, default, opts)
     end
 
-    def seconds(amount, opts \\ []) do
-        Drepel.Env.createSource(amount*1000, fn state -> {state, state+1} end, 1, 0, opts)
+    def milliseconds(rate \\ 100, opts \\ []) when is_integer(rate) do
+        fct = fn -> :os.system_time(:millisecond) end
+        Drepel.Env.createSource(rate, fct, fct, opts)
+    end
+
+    def seconds(rate \\ 1000, opts \\ []) when is_integer(rate) do
+        fct = fn -> :os.system_time(:second) end
+        __MODULE__.customSource(rate, fct, fct, opts)
+    end
+
+    def eventSource(port, default, opts \\ []) when is_integer(port) do
+        Drepel.Env.createEventSource(port, default, opts)
     end
     
     def newSignal(parents, fct, opts \\ [])

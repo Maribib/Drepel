@@ -10,6 +10,7 @@ defmodule Drepel.Supervisor do
             Supervisor.Spec.worker(Drepel.Env, [[name: Drepel.Env]]),
             {Signal.Supervisor, name: Signal.Supervisor}, 
             {Source.Supervisor, name: Source.Supervisor},
+            {EventSource.Supervisor, name: EventSource.Supervisor},
             {Task.Supervisor, name: Spawner.GenServer},
 
         ]

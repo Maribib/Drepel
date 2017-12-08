@@ -16,9 +16,14 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, :reset)
     end
 
-    def createSource(refreshRate, fct, initState, default, opts) do
+    def createSource(refreshRate, fct, default, opts) do
         nodeName = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createSource, refreshRate, fct, initState, default, nodeName})
+        GenServer.call(__MODULE__, {:createSource, refreshRate, fct, default, nodeName})
+    end
+
+    def createEventSource(port, default, opts) do
+        nodeName = :proplists.get_value(:node, opts, node())
+        GenServer.call(__MODULE__, {:createEventSource, port, default, nodeName})
     end
 
     def createNode(parents, fct, opts) do
@@ -95,13 +100,28 @@ defmodule Drepel.Env do
         { :reply, :ok, %__MODULE__{} }
     end
 
-    def handle_call({:createSource, refreshRate, fct, initState, default, nodeName}, _from, env) do
+    def handle_call({:createSource, refreshRate, fct, default, nodeName}, _from, env) do
         id = { String.to_atom("dnode_#{env.id}"), nodeName }
         newSource = %Source{
             id: id, 
             refreshRate: refreshRate, 
             fct: fct, 
-            state: initState,
+            default: default,
+            dependencies: %{ id => id }
+        }
+        env = %{ env | 
+            id: env.id+1, 
+            sources: env.sources ++ [id],
+            nodes: Map.put(env.nodes, id, newSource) 
+        }
+        {:reply, %MockNode{id: id}, env}
+    end
+
+    def handle_call({:createEventSource, port, default, nodeName}, _from, env) do
+        id = { String.to_atom("dnode_#{env.id}"), nodeName }
+        newSource = %EventSource{
+            id: id, 
+            port: port,
             default: default,
             dependencies: %{ id => id }
         }
@@ -143,7 +163,13 @@ defmodule Drepel.Env do
         nodes = Map.keys(env.nodes) -- env.sources
         Enum.map(nodes, &Signal.Supervisor.start(Map.get(env.nodes, &1)))
         # start sources
-        Enum.map(env.sources, &Source.Supervisor.start(Map.get(env.nodes, &1)))
+        Enum.map(env.sources, fn id ->
+            source = Map.get(env.nodes, id)
+            case source do
+                %Source{} -> Source.Supervisor.start(source)
+                %EventSource{} -> EventSource.Supervisor.start(source)
+            end
+        end)
         {:reply, :ok, env}
     end
 
