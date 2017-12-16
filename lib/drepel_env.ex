@@ -47,15 +47,15 @@ defmodule Drepel.Env do
     def _chooseHandler(parents, deps, initState) do
         if length(parents)==1 do
             case initState do
-                %Sentinel{} -> { &Signal.map/4, nil }
-                _ -> { &Signal.scan/4, nil }
+                %Sentinel{} -> { &Signal.map/5, nil }
+                _ -> { &Signal.scan/5, nil }
             end
         else
             if Enum.reduce(deps, true, fn {_source, parents}, acc -> acc && length(parents)==1 end) do
-                { &Signal.latest/4, nil }
+                { &Signal.latest/5, nil }
             else
                 { 
-                    &Signal.checkDeps/4, 
+                    &Signal.qprop/5, 
                     Enum.reduce(deps, %{}, fn {source, parents}, acc ->
                         sourceBuffs = Enum.reduce(parents, %{}, fn parentId, acc ->
                             Map.put(acc, parentId, :queue.new()) 
@@ -101,7 +101,7 @@ defmodule Drepel.Env do
     end
 
     def handle_call({:createSource, refreshRate, fct, default, nodeName}, _from, env) do
-        id = { String.to_atom("dnode_#{env.id}"), nodeName }
+        id = { String.to_atom("node_#{env.id}"), nodeName }
         newSource = %Source{
             id: id, 
             refreshRate: refreshRate, 
@@ -118,7 +118,7 @@ defmodule Drepel.Env do
     end
 
     def handle_call({:createEventSource, port, default, nodeName}, _from, env) do
-        id = { String.to_atom("dnode_#{env.id}"), nodeName }
+        id = { String.to_atom("node_#{env.id}"), nodeName }
         newSource = %EventSource{
             id: id, 
             port: port,
@@ -134,7 +134,7 @@ defmodule Drepel.Env do
     end
 
     def handle_call({:createNode, parents, fct, initState, nodeName}, _from, env) do
-        id = { String.to_atom("dnode_#{env.id}"), nodeName }
+        id = { String.to_atom("node_#{env.id}"), nodeName }
         dependencies = _computeDepedencies(env, parents)
         {onReceive, buffs} = _chooseHandler(parents, dependencies, initState)
         newSignal = %Signal{ 
@@ -159,6 +159,9 @@ defmodule Drepel.Env do
     end
 
     def handle_call(:startNodes, _from, env) do
+        # reset stats
+        clustNodes = Map.keys(env.nodes) |> Enum.map(&Kernel.elem(&1, 1)) |> Enum.uniq()
+        Enum.map(clustNodes, &Drepel.Stats.reset(&1))
         # start signals
         nodes = Map.keys(env.nodes) -- env.sources
         Enum.map(nodes, &Signal.Supervisor.start(Map.get(env.nodes, &1)))
@@ -176,6 +179,11 @@ defmodule Drepel.Env do
     def handle_call(:stopNodes, _from, env) do
         stopAll(Source.Supervisor, env.sources)
         stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources)
+        # get statitics
+        clustNodes = Map.keys(env.nodes) |> Enum.map(&Kernel.elem(&1, 1)) |> Enum.uniq()
+        stats = Enum.map(clustNodes, &Drepel.Stats.get(&1))
+        IO.puts inspect stats
+        IO.puts inspect Enum.map(stats, fn s -> s.cnt>0 && s.sum/s.cnt || 0 end)
         {:reply, :ok, env}
     end
 

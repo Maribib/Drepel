@@ -38,7 +38,8 @@ defmodule Source do
     	#IO.puts "produce #{inspect aSource.id}"
     	ref = Process.send_after(elem(aSource.id, 0), :produce, aSource.refreshRate)
     	value = aSource.fct.()
-    	Enum.map(aSource.children, &Signal.propagate(&1, aSource.id, aSource.id, value))
+    	timestamp = :os.system_time(:microsecond)
+    	Enum.map(aSource.children, &Signal.propagate(&1, aSource.id, aSource.id, value, timestamp))
     	{ :noreply, %{ aSource | ref: ref } }
     end
 

@@ -28,7 +28,8 @@ defmodule EventSource do
   # Server API
 
   def handle_info({:tcp, _socket, value}, aSource) do
-    Enum.map(aSource.children, &Signal.propagate(&1, aSource.id, aSource.id, value))
+    timestamp = :os.system_time(:microsecond)
+    Enum.map(aSource.children, &Signal.propagate(&1, aSource.id, aSource.id, value, timestamp))
     {:noreply, aSource}
   end
 
