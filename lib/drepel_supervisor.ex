@@ -1,16 +1,18 @@
 defmodule Drepel.Supervisor do
     use Supervisor
 
-    def start_link(_opts \\ nil) do
+    def start_link(_opt \\ nil) do
         Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
     def init(:ok) do
         children = [
-            Supervisor.Spec.worker(Manager, [[], [name: Manager]]),
-            Supervisor.Spec.worker(Schedule, [[], [name: Schedule]]),
-            Supervisor.Spec.worker(Scheduler, [[], [name: Scheduler]]),
-            Supervisor.Spec.supervisor(DNode.Supervisor, [[name: DNode.Supervisor]])
+            Supervisor.Spec.worker(Drepel.Env, [[name: Drepel.Env]]),
+            {Signal.Supervisor, name: Signal.Supervisor}, 
+            {Source.Supervisor, name: Source.Supervisor},
+            {EventSource.Supervisor, name: EventSource.Supervisor},
+            {Task.Supervisor, name: Spawner.GenServer},
+
         ]
         Supervisor.init(children, strategy: :one_for_one)
     end
