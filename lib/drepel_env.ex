@@ -26,14 +26,14 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, {:createEventSource, port, default, nodeName})
     end
 
-    def createNode(parents, fct, opts) do
+    def createSignal(parents, fct, opts) do
         nodeName = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createNode, parents, fct, %Sentinel{}, nodeName})
+        GenServer.call(__MODULE__, {:createSignal, parents, fct, %Sentinel{}, nodeName})
     end
 
     def createStatedNode(parents, fct, initState, opts) do
         nodeName = :proplists.get_value(:node, opts, node())    
-        GenServer.call(__MODULE__, {:createNode, parents, fct, initState, nodeName})
+        GenServer.call(__MODULE__, {:createSignal, parents, fct, initState, nodeName})
     end
 
     def startNodes do
@@ -133,7 +133,7 @@ defmodule Drepel.Env do
         {:reply, %MockNode{id: id}, env}
     end
 
-    def handle_call({:createNode, parents, fct, initState, nodeName}, _from, env) do
+    def handle_call({:createSignal, parents, fct, initState, nodeName}, _from, env) do
         id = { String.to_atom("node_#{env.id}"), nodeName }
         dependencies = _computeDepedencies(env, parents)
         {onReceive, buffs} = _chooseHandler(parents, dependencies, initState)

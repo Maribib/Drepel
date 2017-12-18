@@ -38,7 +38,7 @@ defmodule Drepel do
     def newSignal(parents, fct, opts) when is_list(parents) and is_function(fct) do
         if length(parents)>0 do
             if :erlang.fun_info(fct)[:arity]==length(parents) do
-                Drepel.Env.createNode(Enum.map(parents, fn %MockNode{id: id} -> id end), fct, opts)
+                Drepel.Env.createSignal(Enum.map(parents, fn %MockNode{id: id} -> id end), fct, opts)
             else
                 throw "The arity of the function must be equal to the number of parents."
             end
@@ -69,7 +69,10 @@ defmodule Drepel do
 
     def filter(%MockNode{}=parent, initState, predicate, opts \\ []) when is_function(predicate) do
         if :erlang.fun_info(predicate)[:arity]==1 do
-            fct = fn new, old -> predicate.(new) && new || old end
+            fct = fn new, old -> 
+                res = predicate.(new) && new || old 
+                { res, res }
+            end
             reduce(parent, initState, fct, opts)
         else
             throw "The arity of the predicate function must be 1."

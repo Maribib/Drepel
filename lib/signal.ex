@@ -1,7 +1,7 @@
 
 defmodule Signal do
     @enforce_keys [:id, :fct, :onReceive, :args, :buffs]
-    defstruct [ :id, :fct, :onReceive, :args, :dependencies, :buffs,
+    defstruct [ :id, :fct, :onReceive, :args, :dependencies, :buffs, :default,
     parents: [], children: [], startReceived: 0, state: %Sentinel{}, hasChildren: false ]
 
     use GenServer, restart: :transient
@@ -91,10 +91,8 @@ defmodule Signal do
         aSignal = %{ aSignal | args: %{ aSignal.args | sender => parentDefault } }
         if Enum.count(aSignal.args, fn {_, arg} -> arg==%Sentinel{} end)==0 do
             if length(aSignal.children)>0 do
-                default = case aSignal.state do
-                    %Sentinel{} -> apply(aSignal.fct, Enum.map(aSignal.parents, &Map.get(aSignal.args, &1)))
-                    _ -> aSignal.state
-                end
+                args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
+                default = apply(aSignal.fct, args ++ (aSignal.state==%Sentinel{} && [] || [aSignal.state] ))
                 Enum.map(aSignal.children, &__MODULE__.propagateDefault(&1, aSignal.id, default))
             else
                 apply(aSignal.fct, Enum.map(aSignal.parents, &Map.get(aSignal.args, &1)))

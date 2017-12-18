@@ -4,7 +4,8 @@ defmodule Distrib do
     end
 
     def count(_x, acc) do
-    	acc+1
+    	res = acc+1
+    	{ res, res }
     end
 
     def greaterThan10(x) do
