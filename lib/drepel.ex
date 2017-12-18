@@ -17,7 +17,7 @@ defmodule Drepel do
     end
 
     def customSource(rate, default, fct, opts \\ []) when is_integer(rate) do
-        Drepel.Env.createSource(rate, fn state -> { fct.(), state} end, default, opts)
+        Drepel.Env.createSource(rate, fct, default, opts)
     end
 
     def milliseconds(rate \\ 100, opts \\ []) when is_integer(rate) do
@@ -67,12 +67,12 @@ defmodule Drepel do
         scan(parent, initState, fct, opts)
     end
 
-    def filter(%MockNode{}=parent, initState, condition, opts \\ []) when is_function(condition) do
-        if :erlang.fun_info(condition)[:arity]==1 do
-            fct = fn new, old -> condition.(new) && new || old end
+    def filter(%MockNode{}=parent, initState, predicate, opts \\ []) when is_function(predicate) do
+        if :erlang.fun_info(predicate)[:arity]==1 do
+            fct = fn new, old -> predicate.(new) && new || old end
             reduce(parent, initState, fct, opts)
         else
-            throw "The arity of the condition function must be 1."
+            throw "The arity of the predicate function must be 1."
         end
     end
 

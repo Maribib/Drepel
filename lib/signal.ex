@@ -38,9 +38,9 @@ defmodule Signal do
     end
 
     def scan(aSignal, source, _sender, value, timestamp) do
-        res = aSignal.fct.(value, aSignal.state)
+        {res, state} = aSignal.fct.(value, aSignal.state)
         _propagate(aSignal, source, res, timestamp)
-        %{ aSignal | state: res }
+        %{ aSignal | state: state }
     end
 
     def latest(aSignal, source, sender, value, timestamp) do
