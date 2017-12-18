@@ -1,9 +1,0 @@
-APP="drepel"
-
-BUILD_HOST="my-build-server.myapp.com"
-BUILD_USER="builder"
-BUILD_AT="/tmp/edeliver/myapp/builds"
-
-STAGING_HOSTS="stage.myapp.com"
-STAGING_USER="web"
-DELIVER_TO="/home/web"
