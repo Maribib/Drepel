@@ -89,15 +89,24 @@ defmodule Signal do
     def handle_cast({:propagateDefault, sender, parentDefault}, aSignal) do 
         #IO.puts "propagateDefault #{inspect aSignal.id} #{inspect sender}"
         aSignal = %{ aSignal | args: %{ aSignal.args | sender => parentDefault } }
-        if Enum.count(aSignal.args, fn {_, arg} -> arg==%Sentinel{} end)==0 do
+        aSignal = if Enum.count(aSignal.args, fn {_, arg} -> arg==%Sentinel{} end)==0 do
             if length(aSignal.children)>0 do
                 args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-                default = apply(aSignal.fct, args ++ (aSignal.state==%Sentinel{} && [] || [aSignal.state] ))
+                { default, state } = case aSignal.state do
+                    %Sentinel{} -> 
+                        { apply(aSignal.fct, args), aSignal.state }
+                    _ -> 
+                        apply(aSignal.fct, args ++ [aSignal.state])
+                end
                 Enum.map(aSignal.children, &__MODULE__.propagateDefault(&1, aSignal.id, default))
+                %{ aSignal | state: state }
             else
                 apply(aSignal.fct, Enum.map(aSignal.parents, &Map.get(aSignal.args, &1)))
                 Enum.map(aSignal.parents, &send(&1, :start))
+                aSignal
             end
+        else
+            aSignal
         end
         { :noreply, aSignal}
     end
