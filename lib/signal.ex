@@ -2,7 +2,8 @@
 defmodule Signal do
     @enforce_keys [:id, :fct, :onReceive, :args, :buffs]
     defstruct [ :id, :fct, :onReceive, :args, :dependencies, :buffs, :default,
-    parents: [], children: [], startReceived: 0, state: %Sentinel{}, hasChildren: false ]
+    parents: [], children: [], startReceived: 0, state: %Sentinel{}, hasChildren: false, 
+    sum: 0, cnt: 0 ]
 
     use GenServer, restart: :transient
 
@@ -11,6 +12,10 @@ defmodule Signal do
     def start_link(_opts, aSignal) do
         {id, _node} = aSignal.id
         GenServer.start_link(__MODULE__, aSignal, name: id)
+    end
+
+    def getStats(id) do
+        GenServer.call(id, :getStats)
     end
 
     def propagate(id, source, sender, value, timestamp) do
@@ -32,24 +37,24 @@ defmodule Signal do
 
     def map(aSignal, source, _sender, value, timestamp) do
         #IO.puts "map #{inspect aSignal.id} #{inspect value}"
-        res = aSignal.fct.(value)
+        {time, res} = :timer.tc(aSignal.fct, [value])
         _propagate(aSignal, source, res, timestamp)
-        aSignal
+        %{ aSignal | cnt: aSignal.cnt+1, sum: aSignal.sum+time }
     end
 
     def scan(aSignal, source, _sender, value, timestamp) do
-        {res, state} = aSignal.fct.(value, aSignal.state)
+        {time, {res, state}} = :timer.tc(aSignal.fct, [value, aSignal.state])
         _propagate(aSignal, source, res, timestamp)
-        %{ aSignal | state: state }
+        %{ aSignal | state: state, cnt: aSignal.cnt+1, sum: aSignal.sum+time }
     end
 
     def latest(aSignal, source, sender, value, timestamp) do
         #IO.puts "latest #{inspect aSignal.id} #{inspect value}"
         aSignal = %{ aSignal | args: %{ aSignal.args | sender => value } }
         args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-        res = apply(aSignal.fct, args)
+        {time, res} = :timer.tc(aSignal.fct, args)
         _propagate(aSignal, source, res, timestamp)
-        aSignal
+        %{ aSignal | cnt: aSignal.cnt+1, sum: aSignal.sum+time }
     end
 
     def qprop(aSignal, source, sender, value, timestamp) do
@@ -68,9 +73,9 @@ defmodule Signal do
                 }
             end)
             args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-            res = apply(aSignal.fct, args)
+            {time, res} = :timer.tc(aSignal.fct, args)
             _propagate(aSignal, source, res, timestamp)
-            aSignal
+            %{ aSignal | cnt: aSignal.cnt+1, sum: aSignal.sum+time }
         else
             aSignal
         end
@@ -80,6 +85,10 @@ defmodule Signal do
 
     def init(%__MODULE__{}=aSignal) do
         {:ok, %{ aSignal | hasChildren: length(aSignal.children)>0 } }
+    end
+
+    def handle_call(:getStats, _from, aSignal) do
+        { :reply, Map.take(aSignal, [:cnt, :sum]), aSignal }
     end
 
     def handle_cast({:propagate, source, sender, value, timestamp}, aSignal) do 

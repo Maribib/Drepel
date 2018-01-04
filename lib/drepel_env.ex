@@ -177,6 +177,12 @@ defmodule Drepel.Env do
     end
 
     def handle_call(:stopNodes, _from, env) do
+        # get work stats
+        Enum.map(Map.keys(env.nodes) -- env.sources, fn id -> 
+            %{cnt: cnt, sum: sum} = Signal.getStats(id)
+            IO.puts "#{inspect id} #{cnt} #{sum} #{cnt>0 && sum/cnt || 0}"
+        end)
+
         stopAll(Source.Supervisor, env.sources)
         stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources)
         # get statitics
