@@ -35,26 +35,32 @@ defmodule Signal do
         GenServer.cast(id, {:propagateDefault, sender, value})
     end
 
+    def _apply(aSignal, args) do
+        {duration, res} = :timer.tc(aSignal.fct, args)
+        Drepel.Stats.updateWork(aSignal.id, duration)
+        res
+    end
+
     def map(aSignal, source, _sender, value, timestamp) do
         #IO.puts "map #{inspect aSignal.id} #{inspect value}"
-        {time, res} = :timer.tc(aSignal.fct, [value])
+        res = _apply(aSignal, [value])
         _propagate(aSignal, source, res, timestamp)
-        %{ aSignal | cnt: aSignal.cnt+1, sum: aSignal.sum+time }
+        aSignal
     end
 
     def scan(aSignal, source, _sender, value, timestamp) do
-        {time, {res, state}} = :timer.tc(aSignal.fct, [value, aSignal.state])
+        {res, state} = _apply(aSignal, [value, aSignal.state])
         _propagate(aSignal, source, res, timestamp)
-        %{ aSignal | state: state, cnt: aSignal.cnt+1, sum: aSignal.sum+time }
+        %{ aSignal | state: state }
     end
 
     def latest(aSignal, source, sender, value, timestamp) do
         #IO.puts "latest #{inspect aSignal.id} #{inspect value}"
         aSignal = %{ aSignal | args: %{ aSignal.args | sender => value } }
         args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-        {time, res} = :timer.tc(aSignal.fct, args)
+        res = _apply(aSignal, args)
         _propagate(aSignal, source, res, timestamp)
-        %{ aSignal | cnt: aSignal.cnt+1, sum: aSignal.sum+time }
+        aSignal
     end
 
     def qprop(aSignal, source, sender, value, timestamp) do
@@ -73,9 +79,9 @@ defmodule Signal do
                 }
             end)
             args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-            {time, res} = :timer.tc(aSignal.fct, args)
+            res = _apply(aSignal, args)
             _propagate(aSignal, source, res, timestamp)
-            %{ aSignal | cnt: aSignal.cnt+1, sum: aSignal.sum+time }
+            aSignal
         else
             aSignal
         end

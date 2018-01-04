@@ -177,19 +177,21 @@ defmodule Drepel.Env do
     end
 
     def handle_call(:stopNodes, _from, env) do
-        # get work stats
-        Enum.map(Map.keys(env.nodes) -- env.sources, fn id -> 
-            %{cnt: cnt, sum: sum} = Signal.getStats(id)
-            IO.puts "#{inspect id} #{cnt} #{sum} #{cnt>0 && sum/cnt || 0}"
-        end)
-
         stopAll(Source.Supervisor, env.sources)
         stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources)
         # get statitics
         clustNodes = Map.keys(env.nodes) |> Enum.map(&Kernel.elem(&1, 1)) |> Enum.uniq()
         stats = Enum.map(clustNodes, &Drepel.Stats.get(&1))
-        IO.puts inspect stats
-        IO.puts inspect Enum.map(stats, fn s -> s.cnt>0 && s.sum/s.cnt || 0 end)
+        Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}} -> 
+            avg = cnt>0 && sum/cnt || 0
+            IO.puts "#{max} #{cnt} #{sum} #{avg} "
+        end)
+        Enum.map(stats, fn %{works: works} -> 
+            Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
+                avg = cnt>0 && sum/cnt || 0
+                IO.puts "#{inspect id} #{cnt} #{sum} #{avg}"
+            end)
+        end)
         {:reply, :ok, env}
     end
 

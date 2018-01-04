@@ -1,5 +1,5 @@
 defmodule Drepel.Stats do
-    defstruct [ cnt: 0, sum: 0, max: 0 ]
+    defstruct [ latency: %{cnt: 0, sum: 0, max: 0}, works: %{} ]
 
     use GenServer
     
@@ -21,6 +21,10 @@ defmodule Drepel.Stats do
     	GenServer.cast(__MODULE__, {:updateLatency, delta})
     end
 
+    def updateWork(from, delta) do
+        GenServer.cast(__MODULE__, {:updateWork, from, delta})
+    end
+
     # Server API
 
     def init(:ok) do
@@ -36,11 +40,28 @@ defmodule Drepel.Stats do
     end
 
     def handle_cast({:updateLatency, delta}, stats) do
-    	{ :noreply, %{ stats | 
-    		cnt: stats.cnt+1, 
-    		sum: stats.sum+delta, 
-    		max: stats.max>delta && stats.max || delta 
-    	} }
+    	{ 
+            :noreply, 
+            update_in(stats.latency, fn latency -> 
+                %{ latency |
+                    cnt: latency.cnt+1,
+                    sum: latency.sum+delta, 
+                    max: latency.max>delta && latency.max || delta 
+                }
+            end) 
+        }
     end
 
+    def handle_cast({:updateWork, from, delta}, stats) do
+        { 
+            :noreply, 
+            update_in(stats.works, fn works -> 
+                work = Map.get(works, from, %{cnt: 0, sum: 0})
+                Map.put(works, from, %{ work |
+                    cnt: work.cnt+1,
+                    sum: work.sum+delta
+                })
+            end) 
+        }
+    end
 end
