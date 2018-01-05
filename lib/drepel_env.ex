@@ -184,14 +184,19 @@ defmodule Drepel.Env do
         stats = Enum.map(clustNodes, &Drepel.Stats.get(&1))
         Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}} -> 
             avg = cnt>0 && sum/cnt || 0
-            IO.puts "#{max} #{cnt} #{sum} #{avg} "
+            work = Enum.map(stats, fn %{works: works} ->
+                Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
+                    cnt>0 && sum/cnt || 0
+                end) |> Enum.join(" ")
+            end) |> Enum.join(" ")
+            IO.puts "#{max} #{cnt} #{sum} #{avg} #{work}"
         end)
-        Enum.map(stats, fn %{works: works} -> 
-            Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
-                avg = cnt>0 && sum/cnt || 0
-                IO.puts "#{inspect id} #{cnt} #{sum} #{avg}"
-            end)
-        end)
+        #Enum.map(stats, fn %{works: works} -> 
+        #    Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
+        #        avg = cnt>0 && sum/cnt || 0
+        #        IO.puts "#{inspect id} #{cnt} #{sum} #{avg}"
+        #    end)
+        #end)
         {:reply, :ok, env}
     end
 
