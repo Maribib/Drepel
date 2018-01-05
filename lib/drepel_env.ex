@@ -189,7 +189,7 @@ defmodule Drepel.Env do
                     cnt>0 && sum/cnt || 0
                 end) |> Enum.join(" ")
             end) |> Enum.join(" ")
-            IO.puts "#{max} #{cnt} #{sum} #{avg} #{work}"
+            IO.puts "#{work} #{max} #{cnt} #{sum} #{avg}"
         end)
         #Enum.map(stats, fn %{works: works} -> 
         #    Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
