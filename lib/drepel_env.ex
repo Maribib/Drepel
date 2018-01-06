@@ -182,13 +182,12 @@ defmodule Drepel.Env do
         # get statitics
         clustNodes = Map.keys(env.nodes) |> Enum.map(&Kernel.elem(&1, 1)) |> Enum.uniq()
         stats = Enum.map(clustNodes, &Drepel.Stats.get(&1))
-        Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}} -> 
+        Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}, works: works} -> 
             avg = cnt>0 && sum/cnt || 0
-            work = Enum.map(stats, fn %{works: works} ->
-                Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
-                    cnt>0 && sum/cnt || 0
-                end) |> Enum.join(" ")
+            work = Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
+                cnt>0 && sum/cnt || 0
             end) |> Enum.join(" ")
+            
             IO.puts "#{work} #{max} #{cnt} #{sum} #{avg}"
         end)
         #Enum.map(stats, fn %{works: works} -> 
