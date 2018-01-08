@@ -160,8 +160,10 @@ defmodule Drepel.Env do
 
     def handle_call(:startNodes, _from, env) do
         # reset stats
-        clustNodes = Map.keys(env.nodes) |> Enum.map(&Kernel.elem(&1, 1)) |> Enum.uniq()
-        Enum.map(clustNodes, &Drepel.Stats.reset(&1))
+        clustNodesToSignals = Map.keys(env.nodes) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+        Enum.map(clustNodesToSignals, fn {clustNode, signals} -> 
+            Drepel.Stats.reset(clustNode, signals) 
+        end)
         # start signals
         nodes = Map.keys(env.nodes) -- env.sources
         Enum.map(nodes, &Signal.Supervisor.start(Map.get(env.nodes, &1)))
@@ -173,22 +175,31 @@ defmodule Drepel.Env do
                 %EventSource{} -> EventSource.Supervisor.start(source)
             end
         end)
+        Enum.map(Map.keys(clustNodesToSignals), &Drepel.Stats.startSampling(&1))
         {:reply, :ok, env}
     end
 
     def handle_call(:stopNodes, _from, env) do
+        # stop stats
+        clustNodes = Map.keys(env.nodes) |> Enum.map(&Kernel.elem(&1, 1)) |> Enum.uniq()
+        Enum.map(clustNodes, &Drepel.Stats.stopSampling(&1))
+        # stop nodes
         stopAll(Source.Supervisor, env.sources)
         stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources)
         # get statitics
-        clustNodes = Map.keys(env.nodes) |> Enum.map(&Kernel.elem(&1, 1)) |> Enum.uniq()
         stats = Enum.map(clustNodes, &Drepel.Stats.get(&1))
         Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}, works: works} -> 
             avg = cnt>0 && sum/cnt || 0
-            work = Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
+            work = Enum.map(works, fn {_id, %{cnt: cnt, sum: sum}} -> 
                 cnt>0 && sum/cnt || 0
             end) |> Enum.join(" ")
             
             IO.puts "#{work} #{max} #{cnt} #{sum} #{avg}"
+        end)
+        Enum.map(stats, fn %{msgQ: msgQ} -> 
+            Enum.map(msgQ, fn {signal, samples} -> 
+                IO.puts "#{signal} #{Enum.join(samples, " ")}"
+            end)
         end)
         #Enum.map(stats, fn %{works: works} -> 
         #    Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
