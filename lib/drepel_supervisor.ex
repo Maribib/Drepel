@@ -12,7 +12,10 @@ defmodule Drepel.Supervisor do
             {Signal.Supervisor, name: Signal.Supervisor}, 
             {Source.Supervisor, name: Source.Supervisor},
             {EventSource.Supervisor, name: EventSource.Supervisor},
-            {Task.Supervisor, name: Spawner.GenServer},
+            {Node.Supervisor, name: Node.Supervisor},
+            {Task.Supervisor, name: Task.Spawner},
+            {Store, name: Store},
+            {Checkpoint, name: Checkpoint},
         ]
         Supervisor.init(children, strategy: :one_for_one)
     end

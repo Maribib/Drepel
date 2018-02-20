@@ -5,18 +5,29 @@ defmodule Source.Supervisor do
         Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def start(%Source{}=aSource) do
-        masterNode = node()
-        case aSource.id do
-            {_id, ^masterNode} -> Supervisor.start_child(__MODULE__, [aSource])
-            {_id, node} -> 
-                t = Task.Supervisor.async({Spawner.GenServer, node}, fn ->
-                    if Process.whereis(Manager)==nil do
-                        Task.Supervisor.start_child(Spawner.GenServer, fn -> Node.Supervisor.run(masterNode) end)
-                    end
-                    Source.Supervisor.start(aSource)
+    def start(%Source{}=aSource, clusNodes, repFactor, chckptInterval) do
+        currNode = node()
+        case Map.get(aSource.routing, aSource.id) do
+            ^currNode -> Supervisor.start_child(__MODULE__, [aSource, clusNodes, repFactor, chckptInterval])
+            node -> 
+                t = Task.Supervisor.async({Task.Spawner, node}, fn ->
+                    Source.Supervisor.start(aSource, clusNodes, repFactor, chckptInterval)
                 end)
                 Task.await(t)
+        end
+    end
+
+    def restart(aSource, node, id, chckptId, routing, clustNodes, repFactor, chckptInterval) do
+        currNode = node()
+        case node do
+            ^currNode -> 
+                messages = Store.getMessages(id, chckptId)
+                Supervisor.start_child(__MODULE__, [%{ aSource | routing: routing }, clustNodes, repFactor, chckptInterval, messages])
+            _ -> 
+                Task.Supervisor.async({Task.Spawner, node}, fn ->
+                    Source.Supervisor.restart(aSource, node, id, chckptId, routing, clustNodes, repFactor, chckptInterval)
+                end)
+                |> Task.await()
         end
     end
 

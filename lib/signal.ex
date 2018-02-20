@@ -1,38 +1,50 @@
 
 defmodule Signal do
-    @enforce_keys [:id, :fct, :onReceive, :args, :buffs]
-    defstruct [ :id, :fct, :onReceive, :args, :dependencies, :buffs, :default,
-    parents: [], children: [], startReceived: 0, state: %Sentinel{}, hasChildren: false, 
-    sum: 0, cnt: 0 ]
+    @enforce_keys [:id, :fct, :args]
+    defstruct [ :id, :fct, :args, :dependencies, :buffs, :default,
+    :chckpts, :leader,
+    parents: [], children: [], startReceived: 0, state: %Sentinel{}, 
+    hasChildren: false, chckptId: 0, repNodes: [], routing: %{} ]
 
     use GenServer, restart: :transient
 
     # Client API
 
-    def start_link(_opts, aSignal) do
-        {id, _node} = aSignal.id
-        GenServer.start_link(__MODULE__, aSignal, name: id)
+    def start_link(_opts, aSignal, clustNodes, repFactor) do
+        GenServer.start_link(__MODULE__, {aSignal, clustNodes, repFactor}, name: aSignal.id)
     end
+
+    #def start_link(_opts, aSignal) do
+    #    GenServer.start_link(__MODULE__, aSignal, name: aSignal.id)
+    #end
 
     def getStats(id) do
         GenServer.call(id, :getStats)
     end
 
-    def propagate(id, source, sender, value, timestamp) do
-        GenServer.cast(id, {:propagate, source, sender, value, timestamp})
+    def propagate(aNode, id, message) do
+        GenServer.cast({id, aNode}, {:propagate, message})
     end
 
-    def _propagate(%__MODULE__{}=aSignal, source, value, timestamp) do
+    def _propagate(%__MODULE__{}=aSignal, message, value) do
         if aSignal.hasChildren do
-            Enum.map(aSignal.children, &__MODULE__.propagate(&1, source, aSignal.id, value, timestamp))
+            message = %{ message |
+                sender: aSignal.id,
+                value: value
+            }
+            Enum.map(aSignal.children, &__MODULE__.propagate(Map.get(aSignal.routing, &1), &1, message))
         else
-            delta = :os.system_time(:microsecond) - timestamp
+            delta = :os.system_time(:microsecond) - message.timestamp
             Drepel.Stats.updateLatency(delta)
         end
     end
 
-    def propagateDefault(id, sender, value) do
-        GenServer.cast(id, {:propagateDefault, sender, value})
+    def propagateDefault(aNode, id, sender, value) do
+        GenServer.cast({id, aNode}, {:propagateDefault, sender, value})
+    end
+
+    def propagateChckpt(aNode, id, message) do
+        GenServer.cast({id, aNode}, {:propagateChckpt, message})
     end
 
     def _apply(aSignal, args) do
@@ -41,47 +53,20 @@ defmodule Signal do
         res
     end
 
-    def map(aSignal, source, _sender, value, timestamp) do
-        #IO.puts "map #{inspect aSignal.id} #{inspect value}"
-        res = _apply(aSignal, [value])
-        _propagate(aSignal, source, res, timestamp)
-        aSignal
+    def purge(aSignal) do
+        Enum.reduce(aSignal.buffs, aSignal, fn {source, sourceBuffs}, aSignal -> 
+            _purge(aSignal, source, sourceBuffs)
+        end)
     end
 
-    def scan(aSignal, source, _sender, value, timestamp) do
-        {res, state} = _apply(aSignal, [value, aSignal.state])
-        _propagate(aSignal, source, res, timestamp)
-        %{ aSignal | state: state }
-    end
-
-    def latest(aSignal, source, sender, value, timestamp) do
-        #IO.puts "latest #{inspect aSignal.id} #{inspect value}"
-        aSignal = %{ aSignal | args: %{ aSignal.args | sender => value } }
-        args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-        res = _apply(aSignal, args)
-        _propagate(aSignal, source, res, timestamp)
-        aSignal
-    end
-
-    def qprop(aSignal, source, sender, value, timestamp) do
-        #IO.puts "qprops #{inspect aSignal.id} #{inspect value}"
-        aSignal = update_in(aSignal.buffs[source][sender], &(:queue.in(value, &1)))
-        ready = Enum.reduce_while(aSignal.buffs[source], true, fn {_, queue}, acc ->
-            empty = :queue.is_empty(queue)
-            { empty && :halt || :cont, acc && !empty }
+    def _purge(aSignal, source, sourceBuffs) do
+        ready = Enum.reduce_while(sourceBuffs, true, fn {_, queue}, acc ->
+            ready = !:queue.is_empty(queue) && :queue.head(queue).chckptId==aSignal.chckptId
+            { ready && :cont || :halt, acc && ready }
         end)
         if ready do
-            aSignal = Enum.reduce(aSignal.buffs[source], aSignal, fn {parentId, queue}, aSignal ->
-                {{:value, value}, queue} = :queue.out(queue)
-                %{ aSignal |
-                    buffs: %{ aSignal.buffs | source => Map.put(aSignal.buffs[source], parentId, queue) },
-                    args: Map.put(aSignal.args, parentId, value)
-                }
-            end)
-            args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-            res = _apply(aSignal, args)
-            _propagate(aSignal, source, res, timestamp)
-            aSignal
+            aSignal = consume(aSignal, source)
+            _purge(aSignal, source, sourceBuffs)
         else
             aSignal
         end
@@ -89,16 +74,98 @@ defmodule Signal do
 
     # Server API
 
-    def init(%__MODULE__{}=aSignal) do
-        {:ok, %{ aSignal | hasChildren: length(aSignal.children)>0 } }
+    def init({%__MODULE__{dependencies: deps}=aSignal, clustNodes, repFactor}) do
+        {:ok, %{ aSignal | 
+            repNodes: [node()] ++ Store.computeRepNodes(clustNodes, repFactor),
+            hasChildren: length(aSignal.children)>0, 
+            chckpts: Enum.reduce(aSignal.parents, %{}, &Map.put(&2, &1, 0)),
+            buffs: Enum.reduce(deps, %{}, fn {source, parents}, acc ->
+                sourceBuffs = Enum.reduce(parents, %{}, fn parentId, acc ->
+                    Map.put(acc, parentId, :queue.new()) 
+                end)
+                Map.put(acc, source, sourceBuffs)
+            end),
+            leader: Enum.at(clustNodes, 0)
+        } }
     end
+
+    #def init(aSignal) do
+    #    # eventually new rep nodes
+    #    {:ok, %{ aSignal |
+    #        buffs: Enum.reduce(aSignal.buffs, %{}, fn {source, sourceBuffs}, acc ->
+    #            newSourceBuffs = Enum.reduce(sourceBuffs, %{}, fn {parentId, _}, acc ->
+    #                Map.put(acc, parentId, :queue.new())
+    #            end)
+    #            Map.put(acc, source, newSourceBuffs)
+    #        end),
+    #        chckpts: Enum.reduce(aSignal.chckpts, %{}, fn {parentId, _}, acc ->
+    #            Map.put(acc, parentId, 0)
+    #        end)
+    #    }
+    #end
 
     def handle_call(:getStats, _from, aSignal) do
         { :reply, Map.take(aSignal, [:cnt, :sum]), aSignal }
     end
 
-    def handle_cast({:propagate, source, sender, value, timestamp}, aSignal) do 
-        { :noreply, aSignal.onReceive.(aSignal, source, sender, value, timestamp) }
+    def consume(aSignal, source) do
+        {aSignal, message} = Enum.reduce(aSignal.buffs[source], {aSignal, nil}, fn {parentId, queue}, {aSignal, _} ->
+            {{:value, message}, queue} = :queue.out(queue)
+            {
+                %{ aSignal |
+                    buffs: %{ aSignal.buffs | source => Map.put(aSignal.buffs[source], parentId, queue) },
+                    args: Map.put(aSignal.args, parentId, message.value)
+                },
+                message
+            }
+        end)
+        args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
+        case aSignal.state do
+            %Sentinel{} -> 
+                res = _apply(aSignal, args)
+                _propagate(aSignal, message, res)
+                aSignal
+            _ -> 
+                {res, state} = _apply(aSignal, args ++ [aSignal.state])
+                _propagate(aSignal, message, res)
+                %{ aSignal | state: state }
+        end 
+    end
+
+    def handle_cast({:propagate, %Message{sender: sender, source: source}=message}, aSignal) do 
+        #IO.puts "qprops #{inspect aSignal.id} #{inspect value}"
+        aSignal = update_in(aSignal.buffs[source][sender], &(:queue.in(message, &1)))
+        ready = Enum.reduce_while(aSignal.buffs[source], true, fn {_, queue}, acc ->
+            chckpting = Map.get(aSignal.chckpts, sender)>0
+            empty = :queue.is_empty(queue)
+            ready = !(empty || chckpting)
+            { ready && :cont || :halt, acc && ready }
+        end)
+        if ready do
+            { :noreply, consume(aSignal, source) }
+        else
+            { :noreply, aSignal }
+        end
+    end
+
+    def handle_cast({:propagateChckpt, message}, aSignal) do
+        aSignal = update_in(aSignal.chckpts[message.sender], &(&1 + 1))
+        ready = Enum.reduce_while(aSignal.chckpts, true, fn {_, cnt}, acc ->
+            ready = cnt>0
+            { ready && :cont || :halt, acc && ready }
+        end)
+        if ready do
+            Enum.map(aSignal.repNodes, &Store.put(&1, message.id, aSignal))
+            if !aSignal.hasChildren do
+                Checkpoint.completed(aSignal.leader, aSignal.id, message.id)
+            end
+            chckpts = Enum.reduce(aSignal.chckpts, %{}, fn {k, v}, acc -> Map.put(acc, k, v-1) end)
+            Enum.map(aSignal.children, &__MODULE__.propagateChckpt(Map.get(aSignal.routing, &1), &1, %{ message | sender: aSignal.id}))
+            aSignal = purge(%{ aSignal | chckpts: chckpts, chckptId: message.id })
+            { :noreply, aSignal }
+        else
+            { :noreply, aSignal }
+        end
     end
 
     def handle_cast({:propagateDefault, sender, parentDefault}, aSignal) do 
@@ -113,24 +180,24 @@ defmodule Signal do
                     _ -> 
                         apply(aSignal.fct, args ++ [aSignal.state])
                 end
-                Enum.map(aSignal.children, &__MODULE__.propagateDefault(&1, aSignal.id, default))
+                Enum.map(aSignal.children, &__MODULE__.propagateDefault(Map.get(aSignal.routing, &1), &1, aSignal.id, default))
                 %{ aSignal | state: state }
             else
                 apply(aSignal.fct, Enum.map(aSignal.parents, &Map.get(aSignal.args, &1)))
-                Enum.map(aSignal.parents, &send(&1, :start))
+                Enum.map(aSignal.parents, &send({&1, Map.get(aSignal.routing, &1)}, :start))
                 aSignal
             end
         else
             aSignal
         end
-        { :noreply, aSignal}
+        { :noreply, aSignal }
     end
 
     def handle_info(:start, aSignal) do
         #IO.puts "start #{inspect aSignal.id} "
         aSignal = %{ aSignal | startReceived: aSignal.startReceived+1 }
         if length(aSignal.children)==aSignal.startReceived do
-            Enum.map(aSignal.parents, &send(&1, :start))
+            Enum.map(aSignal.parents, &send({&1, Map.get(aSignal.routing, &1)}, :start))
         end
         { :noreply, aSignal }
     end 

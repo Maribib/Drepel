@@ -33,6 +33,10 @@ defmodule Drepel.Stats do
         GenServer.call({__MODULE__, nodeName}, :stopSampling)
     end
 
+    def stopSampling do
+        GenServer.call(__MODULE__, :stopSampling)
+    end
+
     # Server API
 
     def init(:ok) do
@@ -76,7 +80,7 @@ defmodule Drepel.Stats do
         }
     end
 
-    def handle_cast({:updateWork, {signal, _node}, delta}, stats) do
+    def handle_cast({:updateWork, signal, delta}, stats) do
         { 
             :noreply, 
             update_in(stats.works[signal], fn work -> 
