@@ -82,6 +82,51 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, {:restore, chckptId, clustNodes, nodesDown})
     end
 
+    def computeNewRouting(env, nodesDown) do
+        oldClustNodes = Map.values(env.routing) |> Enum.uniq()
+        Enum.reduce(env.routing, %{}, fn {id, node}, acc ->
+            if Enum.member?(nodesDown, node) do
+                repNodes = Store.computeRepNodes(oldClustNodes, env.repFactor, node)
+                newNode = Enum.reduce_while(repNodes, nil, fn repNode, acc ->
+                    if Enum.member?(nodesDown, repNode) do
+                        { :cont, acc }
+                    else
+                        { :halt, repNode }
+                    end
+                end)
+                Map.put(acc, id, newNode)
+            else
+                Map.put(acc, id, node)
+            end
+        end)
+    end
+
+    def restartSignals(env, chckptId, nodesDown, clustNodes, newRouting) do
+        Enum.map(Map.keys(env.nodes) -- env.sources, fn id ->
+            aNode = Map.get(env.routing, id)
+            aNode = if Enum.member?(nodesDown, aNode) do
+                Map.get(newRouting, id)
+            else
+                aNode
+            end
+            Signal.Supervisor.restart(aNode, id, chckptId, newRouting, clustNodes, env.repFactor)
+        end)
+    end
+
+    def restartSources(env, chckptId, nodesDown, clustNodes, newRouting) do
+        Enum.map(env.sources, fn id ->
+            aNode = Map.get(env.routing, id)
+            aNode = if Enum.member?(nodesDown, aNode) do
+                Map.get(newRouting, id)
+            else
+                aNode
+            end
+            source = Map.get(env.nodes, id)
+            sourceCls = Module.concat(source.__struct__, Supervisor)
+            sourceCls.restart(source, aNode, id, chckptId, newRouting, clustNodes, env.repFactor, env.chckptInterval)
+        end)
+    end
+
     # Server API
 
     def init(:ok) do
@@ -228,54 +273,14 @@ defmodule Drepel.Env do
 
     def handle_call({:restore, chckptId, clustNodes, nodesDown}, _from, env) do
         # compute new routing table
-        oldClustNodes = Map.values(env.routing) |> Enum.uniq()
-        newRouting = Enum.reduce(env.routing, %{}, fn {id, node}, acc ->
-            if Enum.member?(nodesDown, node) do
-                repNodes = Store.computeRepNodes(oldClustNodes, env.repFactor, node)
-                newNode = Enum.reduce_while(repNodes, nil, fn repNode, acc ->
-                    if Enum.member?(nodesDown, repNode) do
-                        { :cont, acc }
-                    else
-                        { :halt, repNode }
-                    end
-                end)
-                Map.put(acc, id, newNode)
-            else
-                Map.put(acc, id, node)
-            end
-        end)
+        newRouting = computeNewRouting(env, nodesDown)
         # reset checkpointing
         leader = Enum.at(clustNodes, 0)
         Checkpoint.reset(leader, listSinks(env), clustNodes)
         # restart all signals
-        Enum.map(Map.keys(env.nodes) -- env.sources, fn id ->
-            aNode = Map.get(env.routing, id)
-            if Enum.member?(nodesDown, aNode) do
-                newNode = Map.get(newRouting, id)
-                Signal.Supervisor.restart(newNode, id, chckptId, newRouting, clustNodes, env.repFactor)
-            else
-                Signal.Supervisor.restart(aNode, id, chckptId, newRouting, clustNodes, env.repFactor)
-            end
-        end)
+        restartSignals(env, chckptId, nodesDown, clustNodes, newRouting)
         # restart all sources
-        # TODO ref v
-        Enum.map(env.sources, fn id ->
-            aNode = Map.get(env.routing, id)
-            if Enum.member?(nodesDown, aNode) do
-                newNode = Map.get(newRouting, id)
-                source = Map.get(env.nodes, id)
-                case source do
-                    %Source{} -> Source.Supervisor.restart(source, newNode, id, chckptId, newRouting, clustNodes, env.repFactor, env.chckptInterval)
-                    %EventSource{} -> EventSource.Supervisor.restart(source, newNode, id, chckptId, newRouting, clustNodes, env.repFactor, env.chckptInterval)
-                end
-            else
-                source = Map.get(env.nodes, id)
-                case source do
-                    %Source{} -> Source.Supervisor.restart(source, aNode, id, chckptId, newRouting, clustNodes, env.repFactor, env.chckptInterval)
-                    %EventSource{} -> EventSource.Supervisor.restart(source, aNode, id, chckptId, newRouting, clustNodes, env.repFactor, env.chckptInterval)
-                end
-            end
-        end)
+        restartSources(env, chckptId, nodesDown, clustNodes, newRouting)
         { :reply, :ok, env}
     end
 
