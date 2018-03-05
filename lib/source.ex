@@ -3,6 +3,7 @@ require Signal
 defmodule Source do 
 	@enforce_keys [ :id, :refreshRate, :fct, :default ]
 	defstruct [ :id, :refreshRate, :fct, :default, :dependencies, :chckptInterval, 
+    :clustNodes, :repNodes, :chckptInterval,
 	children: [], startReceived: 0, prodTimer: nil, repNodes: [], chckptTimer: nil,
     chckptId: 0, routing: %{}]
 
@@ -10,34 +11,34 @@ defmodule Source do
 
 	# Client API
 
-	def start_link(_opts, aSource, clustNodes, repFactor, chckptInterval) do
-		GenServer.start_link(__MODULE__, {aSource, clustNodes, repFactor, chckptInterval}, name: aSource.id)
+	def start_link(_opts, aSource) do
+		GenServer.start_link(__MODULE__, aSource, name: aSource.id)
     end
 
-    def start_link(_opts, aSource, clustNodes, repFactor, chckptInterval, messages) do
-        GenServer.start_link(__MODULE__, {aSource, clustNodes, repFactor, chckptInterval, messages}, name: aSource.id)
+    def start_link(_opts, aSource, messages) do
+        GenServer.start_link(__MODULE__, {aSource, messages}, name: aSource.id)
     end
 
 	# Server API
 
-	def init({%__MODULE__{}=aSource, clustNodes, repFactor, chckptInterval}) do
+	def init(%__MODULE__{}=aSource) do
 		Process.flag(:trap_exit, true)
 		defaultValue = case aSource.default do
 			d when is_function(d) -> d.()
 			_ -> aSource.default
 		end
 		Enum.map(aSource.children, &Signal.propagateDefault(Map.get(aSource.routing, &1), &1, aSource.id, defaultValue))
-        { :ok, %{ aSource | 
-            repNodes: [node()] ++ Store.computeRepNodes(clustNodes, repFactor), 
-            chckptInterval: chckptInterval 
-        } }
+        { :ok, aSource }
     end
 
-    def init({%__MODULE__{}=aSource, clustNodes, repFactor, chckptInterval, messages}) do
+    def init({%__MODULE__{}=aSource, messages}) do
         IO.puts "restarted"
         Process.flag(:trap_exit, true)
-        prodTimer = Process.send_after(aSource.id, :produce, aSource.refreshRate)
-        chckptTimer = Process.send_after(aSource.id, :checkpoint, chckptInterval)
+        chckptTimer = if aSource.chckptInterval>0 do
+            Process.send_after(aSource.id, :checkpoint, aSource.chckptInterval)
+        else
+            nil
+        end 
         chckptId = Enum.reduce(messages, aSource.chckptId, fn message, acc ->
             {propFct, chckptId} = case message do
                 %ChckptMessage{id: id} -> {&Signal.propagateChckpt/3, id+1}
@@ -47,10 +48,8 @@ defmodule Source do
             chckptId
         end)
         {:ok, %{ aSource |
-            repNodes: [node()] ++ Store.computeRepNodes(clustNodes, repFactor), 
-            prodTimer: prodTimer,
+            prodTimer: Process.send_after(aSource.id, :produce, aSource.refreshRate),
             chckptTimer: chckptTimer,
-            chckptInterval: chckptInterval,
             chckptId: chckptId
         } }
     end

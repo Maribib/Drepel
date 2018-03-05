@@ -16,6 +16,15 @@ defmodule Drepel do
         Drepel.Env.reset()
     end
 
+    def setCheckpointInterval(interval) when is_integer(interval) do
+        if interval>=0 do
+            Drepel.Env.setCheckpointInterval(interval)
+        else
+            throw "The interval value must be positive to enable checkpointing.
+            Use 0 value to disable checkpointing."
+        end
+    end
+
     def source(rate, default, fct, opts \\ []) when is_integer(rate) do
         Drepel.Env.createSource(rate, fct, default, opts)
     end

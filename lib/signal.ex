@@ -10,8 +10,8 @@ defmodule Signal do
 
     # Client API
 
-    def start_link(_opts, aSignal, clustNodes, repFactor) do
-        GenServer.start_link(__MODULE__, {aSignal, clustNodes, repFactor}, name: aSignal.id)
+    def start_link(_opts, aSignal) do
+        GenServer.start_link(__MODULE__, aSignal, name: aSignal.id)
     end
 
     def getStats(id) do
@@ -70,9 +70,8 @@ defmodule Signal do
 
     # Server API
 
-    def init({%__MODULE__{dependencies: deps}=aSignal, clustNodes, repFactor}) do
+    def init(%__MODULE__{dependencies: deps}=aSignal) do
         {:ok, %{ aSignal | 
-            repNodes: [node()] ++ Store.computeRepNodes(clustNodes, repFactor),
             hasChildren: length(aSignal.children)>0, 
             chckpts: Enum.reduce(aSignal.parents, %{}, &Map.put(&2, &1, 0)),
             buffs: Enum.reduce(deps, %{}, fn {source, parents}, acc ->
@@ -80,8 +79,7 @@ defmodule Signal do
                     Map.put(acc, parentId, :queue.new()) 
                 end)
                 Map.put(acc, source, sourceBuffs)
-            end),
-            leader: Enum.at(clustNodes, 0)
+            end)
         } }
     end
 

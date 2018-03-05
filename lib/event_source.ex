@@ -4,26 +4,27 @@ defmodule EventSource do
   @enforce_keys [ :id, :port, :default ]
   defstruct [ :id, :port, :default, :dependencies, :socket, 
   :listen_socket, :chckptInterval, :chckptTimer,
-  children: [], startReceived: 0, ip: {127,0,0,1}, repNodes: [], chckptId: 0, routing: %{}]
+  children: [], startReceived: 0, ip: {127,0,0,1}, repNodes: [], 
+  chckptId: 0, routing: %{}]
   
   use GenServer, restart: :transient
 
   # Client API
 
-  def start_link(_opts, aSource, clustNodes, repFactor, chckptInterval) do 
-    GenServer.start_link(__MODULE__, {aSource, clustNodes, repFactor, chckptInterval}, name: aSource.id)
+  def start_link(_opts, aSource) do 
+    GenServer.start_link(__MODULE__, aSource, name: aSource.id)
   end
 
-  def init({%__MODULE__{id: id}=aSource, clustNodes, repFactor, chckptInterval}) do
+  def init(%__MODULE__{id: id}=aSource) do
     #IO.puts "init event-source #{inspect aSource.id}"
-    chckptTimer = Process.send_after(id, :checkpoint, aSource.chckptInterval)
     Process.flag(:trap_exit, true)
+    chckptTimer = if aSource.chckptInterval>0 do
+      Process.send_after(id, :checkpoint, aSource.chckptInterval)
+    else
+      nil
+    end
     Enum.map(aSource.children, &Signal.propagateDefault(Map.get(aSource.routing, &1), &1, id, aSource.default))
-    {:ok, %{ aSource | 
-      repNodes: [node()] ++ Store.computeRepNodes(clustNodes, repFactor), 
-      chckptInterval: chckptInterval,
-      chckptTimer: chckptTimer
-    } }
+    {:ok, %{ aSource | chckptTimer: chckptTimer } }
   end
 
   def terminate(_reason, aSource) do

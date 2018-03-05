@@ -1,16 +1,6 @@
 defmodule Store do
 
     use GenServer
-
-    def computeRepNodes(clustNodes, repFactor) do
-	    computeRepNodes(clustNodes, repFactor, node())
-	end
-
-	def computeRepNodes(clustNodes, repFactor, aNode) do
-		nbNodes = length(clustNodes)
-		pos = Enum.find_index(clustNodes, fn clustNode -> clustNode==aNode end)
-	    Enum.map(pos..pos+repFactor, fn i -> Enum.at(clustNodes, rem(i, nbNodes)) end)
-	end
     
     # Client API
 

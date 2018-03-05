@@ -7,27 +7,33 @@ defmodule Signal.Supervisor do
         Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def start(%Signal{}=aSignal, clustNodes, repFactor) do
+    def start(%Signal{}=aSignal) do
         masterNode = node()
         case Map.get(aSignal.routing, aSignal.id) do
-            ^masterNode -> Supervisor.start_child(__MODULE__, [aSignal, clustNodes, repFactor])
+            ^masterNode -> Supervisor.start_child(__MODULE__, [aSignal])
             node -> 
-                t = Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    Signal.Supervisor.start(aSignal, clustNodes, repFactor)
+                Task.Supervisor.async({Task.Spawner, node}, fn ->
+                    Signal.Supervisor.start(aSignal)
                 end)
-                Task.await(t)
+                |> Task.await()
         end
     end
 
-    def restart(node, id, chckptId, routing, clustNodes, repFactor) do
+    def restart(node, id, chckptId, routing, repNodes, leader) do
         currNode = node()
         case node do
             ^currNode -> 
                 aSignal = Store.get(id, chckptId)
-                Supervisor.start_child(__MODULE__, [%{ aSignal | routing: routing, chckptId: chckptId+1}, clustNodes, repFactor])
+                aSignal = %{ aSignal | 
+                    repNodes: repNodes,
+                    routing: routing, 
+                    chckptId: chckptId+1,
+                    leader: leader
+                }
+                Supervisor.start_child(__MODULE__, [aSignal])
             _ -> 
                 Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    Signal.Supervisor.restart(node, id, chckptId, routing, clustNodes, repFactor)
+                    Signal.Supervisor.restart(node, id, chckptId, routing, repNodes, leader)
                 end)
                 |> Task.await()
         end
