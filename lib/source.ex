@@ -38,14 +38,20 @@ defmodule Source do
         Process.flag(:trap_exit, true)
         prodTimer = Process.send_after(aSource.id, :produce, aSource.refreshRate)
         chckptTimer = Process.send_after(aSource.id, :checkpoint, chckptInterval)
-        Enum.map(messages, fn message ->
-            Enum.map(aSource.children, &Signal.propagate(Map.get(aSource.routing, &1), &1, message))
+        chckptId = Enum.reduce(messages, aSource.chckptId, fn message, acc ->
+            {propFct, chckptId} = case message do
+                %ChckptMessage{id: id} -> {&Signal.propagateChckpt/3, id+1}
+                %Message{} -> {&Signal.propagate/3, acc}
+            end
+            Enum.map(aSource.children, &propFct.(Map.get(aSource.routing, &1), &1, message))
+            chckptId
         end)
         {:ok, %{ aSource |
             repNodes: [node()] ++ Store.computeRepNodes(clustNodes, repFactor), 
             prodTimer: prodTimer,
             chckptTimer: chckptTimer,
-            chckptInterval: chckptInterval
+            chckptInterval: chckptInterval,
+            chckptId: chckptId
         } }
     end
 
@@ -75,6 +81,7 @@ defmodule Source do
             id: aSource.chckptId,
             sender: aSource.id 
         }
+        Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
         Enum.map(aSource.children, &Signal.propagateChckpt(Map.get(aSource.routing, &1), &1, message))
         { :noreply, %{ aSource | 
             chckptTimer: chckptTimer, 

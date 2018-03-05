@@ -24,7 +24,7 @@ defmodule Signal.Supervisor do
         case node do
             ^currNode -> 
                 aSignal = Store.get(id, chckptId)
-                Supervisor.start_child(__MODULE__, [%{ aSignal | routing: routing}, clustNodes, repFactor])
+                Supervisor.start_child(__MODULE__, [%{ aSignal | routing: routing, chckptId: chckptId+1}, clustNodes, repFactor])
             _ -> 
                 Task.Supervisor.async({Task.Spawner, node}, fn ->
                     Signal.Supervisor.restart(node, id, chckptId, routing, clustNodes, repFactor)

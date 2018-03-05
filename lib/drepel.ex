@@ -16,26 +16,26 @@ defmodule Drepel do
         Drepel.Env.reset()
     end
 
-    def customSource(rate, default, fct, opts \\ []) when is_integer(rate) do
+    def source(rate, default, fct, opts \\ []) when is_integer(rate) do
         Drepel.Env.createSource(rate, fct, default, opts)
     end
 
     def milliseconds(rate \\ 100, opts \\ []) when is_integer(rate) do
         fct = fn -> :os.system_time(:millisecond) end
-        Drepel.Env.createSource(rate, fct, fct, opts)
+        __MODULE__.source(rate, fct, fct, opts)
     end
 
     def seconds(rate \\ 1000, opts \\ []) when is_integer(rate) do
         fct = fn -> :os.system_time(:second) end
-        __MODULE__.customSource(rate, fct, fct, opts)
+        __MODULE__.source(rate, fct, fct, opts)
     end
 
     def eventSource(port, default, opts \\ []) when is_integer(port) do
         Drepel.Env.createEventSource(port, default, opts)
     end
     
-    def newSignal(parents, fct, opts \\ [])
-    def newSignal(parents, fct, opts) when is_list(parents) and is_function(fct) do
+    def signal(parents, fct, opts \\ [])
+    def signal(parents, fct, opts) when is_list(parents) and is_function(fct) do
         if length(parents)>0 do
             if :erlang.fun_info(fct)[:arity]==length(parents) do
                 Drepel.Env.createSignal(Enum.map(parents, fn %MockNode{id: id} -> id end), fct, opts)
@@ -47,12 +47,12 @@ defmodule Drepel do
         end
     end
 
-    def newSignal(%MockNode{}=parent, fct, opts) when is_function(fct) do
-        newSignal([parent], fct, opts)
+    def signal(%MockNode{}=parent, fct, opts) when is_function(fct) do
+        signal([parent], fct, opts)
     end
 
     def map(%MockNode{}=parent, fct, opts \\ []) when is_function(fct) do
-        newSignal([parent], fct, opts)
+        signal([parent], fct, opts)
     end
 
     def scan(%MockNode{id: id}, initState, fct, opts \\ []) when is_function(fct) do

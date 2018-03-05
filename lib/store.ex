@@ -49,12 +49,12 @@ defmodule Store do
     	{ :reply, :ok, %{} }
     end
 
-    def handle_call({:put, chckptId, %Message{source: source}=message}, _from, store) do
+    def handle_call({:put, chckptId, %{sender: sender}=message}, _from, store) do
     	chckptStore = Map.get(store, chckptId, %{})
-    	messages = Map.get(chckptStore, source, [])
+    	messages = Map.get(chckptStore, sender, [])
     	{ :reply, :ok,
     		Map.put(store, chckptId,
-    			Map.put(chckptStore, source, messages ++ [message])
+    			Map.put(chckptStore, sender, messages ++ [message])
     		)
     	}
     end
@@ -87,7 +87,8 @@ defmodule Store do
     end	
 
     def handle_cast({:clean, chckptId}, store) do
-    	{ :noreply, Map.delete(store, chckptId)}
+    	keys = Enum.filter(Map.keys(store), &(&1<chckptId))
+    	{ :noreply, Map.drop(store, keys)}
     end
 
 end

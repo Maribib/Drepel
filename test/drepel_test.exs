@@ -14,9 +14,9 @@ defmodule DrepelTest do
     """
     test "single_node_1" do
         s = Drepel.milliseconds(100)
-        l1 = Drepel.newSignal(s, fn s -> s+1 end)
-        l2 = Drepel.newSignal(s, fn s -> s-1 end)
-        Drepel.newSignal([l1, l2], fn v1, v2 -> 
+        l1 = Drepel.signal(s, fn s -> s+1 end)
+        l2 = Drepel.signal(s, fn s -> s-1 end)
+        Drepel.signal([l1, l2], fn v1, v2 -> 
             #IO.puts "#{inspect v1} #{inspect v2}"
             assert v1-v2==2
         end)
@@ -34,9 +34,9 @@ defmodule DrepelTest do
     test "single_node_2" do
         s1 = Drepel.milliseconds(100)
         s2 = Drepel.milliseconds(300)
-        l1 = Drepel.newSignal(s1, fn s -> s+1 end)
-        l2 = Drepel.newSignal(s1, fn s -> s-1 end)
-        Drepel.newSignal([l1, l2, s2], fn v1, v2, v3 -> 
+        l1 = Drepel.signal(s1, fn s -> s+1 end)
+        l2 = Drepel.signal(s1, fn s -> s-1 end)
+        Drepel.signal([l1, l2, s2], fn v1, v2, v3 -> 
             #IO.puts "#{v1} #{v2} #{v3}"
             assert v1-v2==2
         end)
@@ -54,11 +54,11 @@ defmodule DrepelTest do
     test "single_node_3" do
         s1 = Drepel.milliseconds(100)
         s2 = Drepel.milliseconds(300)
-        l1 = Drepel.newSignal(s1, fn s -> s+1 end)
-        l2 = Drepel.newSignal(s1, fn s -> s-1 end)
-        l3 = Drepel.newSignal(s2, fn s -> s+2 end)
-        l4 = Drepel.newSignal(s2, fn s -> s-2 end)
-        Drepel.newSignal([l1, l2, l3, l4], fn v1, v2, v3, v4 -> 
+        l1 = Drepel.signal(s1, fn s -> s+1 end)
+        l2 = Drepel.signal(s1, fn s -> s-1 end)
+        l3 = Drepel.signal(s2, fn s -> s+2 end)
+        l4 = Drepel.signal(s2, fn s -> s-2 end)
+        Drepel.signal([l1, l2, l3, l4], fn v1, v2, v3, v4 -> 
             #IO.puts "#{v1} #{v2} #{v3} #{v4}"
             assert v1-v2==2
             assert v3-v4==4
@@ -78,11 +78,11 @@ defmodule DrepelTest do
         s1 = Drepel.milliseconds(100)
         s2 = Drepel.milliseconds(200)
         s3 = Drepel.milliseconds(300)
-        l1 = Drepel.newSignal(s1, fn s -> s+1 end)
-        l2 = Drepel.newSignal([s1, s2], fn v1, v2 -> v1+v2 end)
-        l3 = Drepel.newSignal([s2, s3], fn v1, v2 -> v1-v2 end)
-        l4 = Drepel.newSignal(s3, fn s -> s-2 end)
-        Drepel.newSignal([l1, l2, l3, l4], fn v1, v2, v3, v4 -> 
+        l1 = Drepel.signal(s1, fn s -> s+1 end)
+        l2 = Drepel.signal([s1, s2], fn v1, v2 -> v1+v2 end)
+        l3 = Drepel.signal([s2, s3], fn v1, v2 -> v1-v2 end)
+        l4 = Drepel.signal(s3, fn s -> s-2 end)
+        Drepel.signal([l1, l2, l3, l4], fn v1, v2, v3, v4 -> 
             IO.puts "#{v1} #{v2} #{v3} #{v4}"
         end)
         Drepel.run(2000)
@@ -103,8 +103,8 @@ defmodule DrepelTest do
     """
     test "cluster_1" do
         s = Drepel.milliseconds(200, node: :"foo@127.0.0.1")
-        l1 = Drepel.newSignal(s, &Distrib.inc/1, node: :"bar@127.0.0.1")
-        Drepel.newSignal([s, l1], fn v1, v2 -> 
+        l1 = Drepel.signal(s, &Distrib.inc/1, node: :"bar@127.0.0.1")
+        Drepel.signal([s, l1], fn v1, v2 -> 
             assert v1+1==v2
         end)
         Drepel.run(2000)
@@ -114,7 +114,7 @@ defmodule DrepelTest do
         s = Drepel.milliseconds(200, node: :"foo@127.0.0.1")
         l1 = Drepel.scan(s, 0, &Distrib.count/2, node: :"bar@127.0.0.1")
         l2 = Drepel.scan(s, 0, &Distrib.count/2, node: :"foo@127.0.0.1")
-        Drepel.newSignal([l1, l2], fn v1, v2 -> 
+        Drepel.signal([l1, l2], fn v1, v2 -> 
             assert v1==v2
         end)
         Drepel.run(2000)
@@ -123,7 +123,7 @@ defmodule DrepelTest do
     test "cluster_3" do
         s = Drepel.milliseconds(200, node: :"foo@127.0.0.1")
         l1 = Drepel.filter(s, 10, &Distrib.greaterThan10/1, node: :"bar@127.0.0.1")
-        Drepel.newSignal(l1, fn v -> 
+        Drepel.signal(l1, fn v -> 
             assert v>=10
         end)
         Drepel.run(2000)

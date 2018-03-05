@@ -14,10 +14,6 @@ defmodule Signal do
         GenServer.start_link(__MODULE__, {aSignal, clustNodes, repFactor}, name: aSignal.id)
     end
 
-    #def start_link(_opts, aSignal) do
-    #    GenServer.start_link(__MODULE__, aSignal, name: aSignal.id)
-    #end
-
     def getStats(id) do
         GenServer.call(id, :getStats)
     end
