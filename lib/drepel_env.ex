@@ -58,8 +58,9 @@ defmodule Drepel.Env do
         end)
     end
 
-    defp stopAll(supervisor, nodeIds) do
-        tasks = Enum.map(nodeIds, fn {id, node} ->
+    defp stopAll(supervisor, nodeIds, routing) do
+        tasks = Enum.map(nodeIds, fn id ->
+            node = Map.get(routing, id)
             Task.Supervisor.async({Task.Spawner, node}, fn ->
                 pid = Process.whereis(id)
                 Supervisor.terminate_child(supervisor, pid)
@@ -75,7 +76,17 @@ defmodule Drepel.Env do
     end
 
     def replicate(nodeName, sources, nodes, routing, repFactor, chckptInterval) do
-        GenServer.call({__MODULE__, nodeName}, {:replicate, sources, nodes, routing, repFactor, chckptInterval})
+        GenServer.call(
+            {__MODULE__, nodeName}, 
+            {
+                :replicate, 
+                sources, 
+                nodes, 
+                routing, 
+                repFactor, 
+                chckptInterval
+            }
+        )
     end
 
     def restore(chckptId, clustNodes, nodesDown) do
@@ -245,8 +256,8 @@ defmodule Drepel.Env do
         # stop stats
         Enum.map(env.clustNodes, &Drepel.Stats.stopSampling(&1))
         # stop nodes
-        stopAll(Source.Supervisor, env.sources)
-        stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources)
+        stopAll(Source.Supervisor, env.sources, env.routing)
+        stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources, env.routing)
         # get statitics
         stats = Enum.map(env.clustNodes, &Drepel.Stats.get(&1))
         Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}, works: works} -> 

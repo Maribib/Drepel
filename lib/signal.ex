@@ -85,21 +85,6 @@ defmodule Signal do
         } }
     end
 
-    #def init(aSignal) do
-    #    # eventually new rep nodes
-    #    {:ok, %{ aSignal |
-    #        buffs: Enum.reduce(aSignal.buffs, %{}, fn {source, sourceBuffs}, acc ->
-    #            newSourceBuffs = Enum.reduce(sourceBuffs, %{}, fn {parentId, _}, acc ->
-    #                Map.put(acc, parentId, :queue.new())
-    #            end)
-    #            Map.put(acc, source, newSourceBuffs)
-    #        end),
-    #        chckpts: Enum.reduce(aSignal.chckpts, %{}, fn {parentId, _}, acc ->
-    #            Map.put(acc, parentId, 0)
-    #        end)
-    #    }
-    #end
-
     def handle_call(:getStats, _from, aSignal) do
         { :reply, Map.take(aSignal, [:cnt, :sum]), aSignal }
     end
