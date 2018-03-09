@@ -1,7 +1,22 @@
 defmodule Drepel.Stats do
-    defstruct [ latency: %{cnt: 0, sum: 0, max: 0}, works: %{}, msgQ: %{}, sampling: false ]
+    defstruct [ :utilization, :timer, latency: %{cnt: 0, sum: 0, max: 0}, works: %{}, 
+    msgQ: %{} ]
 
     use GenServer
+
+    @samplingRate 1000
+
+    def sampleSchedulers do
+        Enum.sort(:erlang.statistics(:scheduler_wall_time))
+    end
+
+    def utilization(ts0, ts1) do
+        Enum.map(
+            Enum.zip(ts0, ts1), 
+            fn {{i, a0, t0}, {i, a1, t1}} ->
+                {i, (a1 - a0)/(t1 - t0)} 
+            end)
+      end
     
     # Client API
 
@@ -40,6 +55,7 @@ defmodule Drepel.Stats do
     # Server API
 
     def init(:ok) do
+        :erlang.system_flag(:scheduler_wall_time, true)
         { :ok, %__MODULE__{} }
     end
 
@@ -59,12 +75,19 @@ defmodule Drepel.Stats do
     end
 
     def handle_call(:startSampling, _from, stats) do
-        Process.send_after(self(), :sample, 1000)
-        { :reply, :ok, %{ stats | sampling: true } }
+        { 
+            :reply, 
+            :ok,
+            %{ stats | 
+                utilization: sampleSchedulers(),
+                timer: Process.send_after(self(), :sample, @samplingRate)
+            } 
+        }
     end
 
     def handle_call(:stopSampling, _from, stats) do
-        { :reply, :ok, %{ stats | sampling: false } }
+        Utils.cancelTimer(stats.timer)
+        { :reply, :ok, %{ stats | timer: nil } }
     end
 
     def handle_cast({:updateLatency, delta}, stats) do
@@ -92,21 +115,22 @@ defmodule Drepel.Stats do
         }
     end
 
-    def handle_info(:sample, stats) do
-        if stats.sampling do
-            Process.send_after(self(), :sample, 1000)
-            { 
-                :noreply, 
-                Enum.reduce(Map.keys(stats.msgQ), stats, fn signal, stats ->
-                    update_in(stats.msgQ[signal], fn samples ->
-                        pid = Process.whereis(signal)
-                        sample = Process.info(pid, :message_queue_len) |> elem(1)
-                        samples ++ [sample]
-                    end)
-                end)
+    def handle_info(:sample, stats) do    
+        stats = Enum.reduce(Map.keys(stats.msgQ), stats, fn signal, stats ->
+            update_in(stats.msgQ[signal], fn samples ->
+                pid = Process.whereis(signal)
+                sample = Process.info(pid, :message_queue_len) |> elem(1)
+                samples ++ [sample]
+            end)
+        end)
+        newUt = sampleSchedulers()
+        IO.puts inspect utilization(stats.utilization, newUt)
+        { 
+            :noreply, 
+            %{ stats | 
+                utilization: newUt,
+                timer: Process.send_after(self(), :sample, @samplingRate)
             }
-        else
-            { :noreply, stats }
-        end
+        }
     end
 end

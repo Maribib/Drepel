@@ -152,6 +152,7 @@ defmodule Drepel.Env do
         nbNodes = length(clustNodes)
         pos = Enum.find_index(clustNodes, fn clustNode -> clustNode==node end)
         Enum.map(pos..pos+repFactor, fn i -> Enum.at(clustNodes, rem(i, nbNodes)) end)
+        |> Enum.uniq()
     end
 
     # Server API
@@ -309,6 +310,11 @@ defmodule Drepel.Env do
     def handle_call({:restore, chckptId, clustNodes, nodesDown}, _from, env) do
         # compute new routing table
         newRouting = computeNewRouting(env, nodesDown)
+        # reset stats
+        clustNodesToSignals = Map.to_list(newRouting) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+        Enum.map(clustNodesToSignals, fn {clustNode, signals} -> 
+            Drepel.Stats.reset(clustNode, signals) 
+        end)
         # reset checkpointing
         leader = Enum.at(clustNodes, 0)
         Checkpoint.reset(leader, listSinks(env), clustNodes)
@@ -316,6 +322,7 @@ defmodule Drepel.Env do
         restartSignals(env, chckptId, nodesDown, clustNodes, newRouting)
         # restart all sources
         restartSources(env, chckptId, nodesDown, clustNodes, newRouting)
+        Enum.map(Map.keys(clustNodesToSignals), &Drepel.Stats.startSampling(&1))
         { :reply, :ok, env}
     end
 

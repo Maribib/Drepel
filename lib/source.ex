@@ -69,9 +69,15 @@ defmodule Source do
             timestamp: :os.system_time(:microsecond),
             chckptId: aSource.chckptId
         }
+        #IO.puts inspect aSource.repNodes
+        #Utils.poolCall(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
         Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
     	Enum.map(aSource.children, &Signal.propagate(Map.get(aSource.routing, &1), &1, message))
     	{ :noreply, %{ aSource | prodTimer: prodTimer } }
+    end
+
+    def handle_info({:EXIT, _pid, :normal}, s) do
+        { :noreply, s }
     end
 
     def handle_info(:checkpoint, aSource) do
@@ -82,8 +88,8 @@ defmodule Source do
         }
         Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
         Enum.map(aSource.children, &Signal.propagateChckpt(Map.get(aSource.routing, &1), &1, message))
-        { :noreply, %{ aSource | 
-            chckptTimer: chckptTimer, 
+        { :noreply, %{ aSource |
+            chckptTimer: chckptTimer,
             chckptId: aSource.chckptId+1
         } }
     end

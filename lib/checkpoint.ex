@@ -63,11 +63,12 @@ defmodule Checkpoint do
                 %{ state |
                     buffs: Enum.reduce(state.buffs, %{}, fn {id, cnt}, acc ->
                         Map.put(acc, id, cnt-1)
-                    end)
+                    end),
+                    lastCompleted: chckptId
                 }
             }
         else
-            {:noreply, %{state | lastCompleted: chckptId } }
+            {:noreply, state }
         end
     end
 
