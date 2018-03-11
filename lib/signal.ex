@@ -14,25 +14,16 @@ defmodule Signal do
         GenServer.start_link(__MODULE__, aSignal, name: aSignal.id)
     end
 
-    def getStats(id) do
-        GenServer.call(id, :getStats)
-    end
-
     def propagate(aNode, id, message) do
         GenServer.cast({id, aNode}, {:propagate, message})
     end
 
     def _propagate(%__MODULE__{}=aSignal, message, value) do
-        if aSignal.hasChildren do
-            message = %{ message |
-                sender: aSignal.id,
-                value: value
-            }
-            Enum.map(aSignal.children, &__MODULE__.propagate(Map.get(aSignal.routing, &1), &1, message))
-        else
-            delta = :os.system_time(:microsecond) - message.timestamp
-            Drepel.Stats.updateLatency(delta)
-        end
+        message = %{ message |
+            sender: aSignal.id,
+            value: value
+        }
+        Enum.map(aSignal.children, &__MODULE__.propagate(Map.get(aSignal.routing, &1), &1, message))
     end
 
     def propagateDefault(aNode, id, sender, value) do
@@ -41,12 +32,6 @@ defmodule Signal do
 
     def propagateChckpt(aNode, id, message) do
         GenServer.cast({id, aNode}, {:propagateChckpt, message})
-    end
-
-    def _apply(aSignal, args) do
-        {duration, res} = :timer.tc(aSignal.fct, args)
-        Drepel.Stats.updateWork(aSignal.id, duration)
-        res
     end
 
     def purge(aSignal) do
@@ -83,10 +68,6 @@ defmodule Signal do
         } }
     end
 
-    def handle_call(:getStats, _from, aSignal) do
-        { :reply, Map.take(aSignal, [:cnt, :sum]), aSignal }
-    end
-
     def consume(aSignal, source) do
         {aSignal, message} = Enum.reduce(aSignal.buffs[source], {aSignal, nil}, fn {parentId, queue}, {aSignal, _} ->
             {{:value, message}, queue} = :queue.out(queue)
@@ -101,11 +82,11 @@ defmodule Signal do
         args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
         case aSignal.state do
             %Sentinel{} -> 
-                res = _apply(aSignal, args)
+                res = apply(aSignal.fct, args)
                 _propagate(aSignal, message, res)
                 aSignal
             _ -> 
-                {res, state} = _apply(aSignal, args ++ [aSignal.state])
+                {res, state} = apply(aSignal.fct, args ++ [aSignal.state])
                 _propagate(aSignal, message, res)
                 %{ aSignal | state: state }
         end 

@@ -155,6 +155,13 @@ defmodule Drepel.Env do
         |> Enum.uniq()
     end
 
+    def resetStats(routing, leader) do
+        clustNodesToGraphNode = Map.to_list(routing) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
+        Enum.map(clustNodesToGraphNode, fn {clustNode, graphNodes} -> 
+            Drepel.Stats.reset(clustNode, graphNodes, leader) 
+        end)
+    end
+
     # Server API
 
     def init(:ok) do
@@ -233,26 +240,23 @@ defmodule Drepel.Env do
 
     def handle_call(:startNodes, _from, env) do
         clustNodes = Map.values(env.routing) |> Enum.uniq()
+        leader = Enum.at(clustNodes, 0)
         if length(clustNodes)<env.repFactor do
             IO.puts "replication factor is too high"
         end
         Enum.filter(clustNodes, &(&1!=node()))
         |> Enum.map(&Drepel.Env.replicate(&1, env))
         # reset stats
-        clustNodesToSignals = Map.to_list(env.routing) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
-        Enum.map(clustNodesToSignals, fn {clustNode, signals} -> 
-            Drepel.Stats.reset(clustNode, signals) 
-        end)
+        resetStats(env.routing, leader)
         # reset stores
         Enum.map(clustNodes, &Store.reset(&1))
         # reset checkpointing
-        leader = Enum.at(clustNodes, 0)
         Checkpoint.reset(leader, listSinks(env), clustNodes)
         # set up nodes monitoring
         Enum.map(clustNodes, &Node.Supervisor.monitor(&1, clustNodes))
         # start signals
-        nodes = Map.keys(env.nodes) -- env.sources
-        Enum.map(nodes, fn id ->
+        Map.keys(env.nodes) -- env.sources
+        |> Enum.map(fn id ->
             signal = Map.get(env.nodes, id)
             node = Map.get(env.routing, id)
             repNodes = computeRepNodes(clustNodes, env.repFactor, node)
@@ -273,7 +277,8 @@ defmodule Drepel.Env do
                 chckptInterval: env.chckptInterval 
             })
         end)
-        Enum.map(Map.keys(clustNodesToSignals), &Drepel.Stats.startSampling(&1))
+        Enum.map(clustNodes, &Drepel.Stats.startSampling(&1))
+        Balancer.reset(leader, clustNodes)
         {:reply, :ok, %{ env | clustNodes: clustNodes } }
     end
 
@@ -284,20 +289,20 @@ defmodule Drepel.Env do
         stopAll(Source.Supervisor, env.sources, env.routing)
         stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources, env.routing)
         # get statitics
-        stats = Enum.map(env.clustNodes, &Drepel.Stats.get(&1))
-        Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}, works: works} -> 
-            avg = cnt>0 && sum/cnt || 0
-            work = Enum.map(works, fn {_id, %{cnt: cnt, sum: sum}} -> 
-                cnt>0 && sum/cnt || 0
-            end) |> Enum.join(" ")
-            
-            IO.puts "#{work} #{max} #{cnt} #{sum} #{avg}"
-        end)
-        Enum.map(stats, fn %{msgQ: msgQ} -> 
-            Enum.map(msgQ, fn {signal, samples} -> 
-                IO.puts "#{signal} #{Enum.join(samples, " ")}"
-            end)
-        end)
+        #stats = Enum.map(env.clustNodes, &Drepel.Stats.get(&1))
+        #Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}, works: works} -> 
+        #    avg = cnt>0 && sum/cnt || 0
+        #    work = Enum.map(works, fn {_id, %{cnt: cnt, sum: sum}} -> 
+        #        cnt>0 && sum/cnt || 0
+        #    end) |> Enum.join(" ")
+        #    
+        #    IO.puts "#{work} #{max} #{cnt} #{sum} #{avg}"
+        #end)
+        #Enum.map(stats, fn %{msgQ: msgQ} -> 
+        #    Enum.map(msgQ, fn {signal, samples} -> 
+        #        IO.puts "#{signal} #{Enum.join(samples, " ")}"
+        #    end)
+        #end)
         #Enum.map(stats, fn %{works: works} -> 
         #    Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
         #        avg = cnt>0 && sum/cnt || 0
@@ -308,21 +313,19 @@ defmodule Drepel.Env do
     end
 
     def handle_call({:restore, chckptId, clustNodes, nodesDown}, _from, env) do
+        leader = Enum.at(clustNodes, 0)
         # compute new routing table
         newRouting = computeNewRouting(env, nodesDown)
         # reset stats
-        clustNodesToSignals = Map.to_list(newRouting) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
-        Enum.map(clustNodesToSignals, fn {clustNode, signals} -> 
-            Drepel.Stats.reset(clustNode, signals) 
-        end)
+        resetStats(newRouting, leader)
         # reset checkpointing
-        leader = Enum.at(clustNodes, 0)
         Checkpoint.reset(leader, listSinks(env), clustNodes)
         # restart all signals
         restartSignals(env, chckptId, nodesDown, clustNodes, newRouting)
         # restart all sources
         restartSources(env, chckptId, nodesDown, clustNodes, newRouting)
-        Enum.map(Map.keys(clustNodesToSignals), &Drepel.Stats.startSampling(&1))
+        Enum.map(clustNodes, &Drepel.Stats.startSampling(&1))
+        Balancer.reset(clustNodes)
         { :reply, :ok, env}
     end
 

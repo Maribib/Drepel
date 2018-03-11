@@ -40,7 +40,6 @@ defmodule EventSource do
       source: aSource.id,
       sender: aSource.id,
       value: value,
-      timestamp: :os.system_time(:microsecond),
       chckptId: aSource.chckptId
     }
     Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))

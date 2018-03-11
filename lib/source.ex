@@ -66,10 +66,8 @@ defmodule Source do
             source: aSource.id,
             sender: aSource.id,
             value: aSource.fct.(),
-            timestamp: :os.system_time(:microsecond),
             chckptId: aSource.chckptId
         }
-        #IO.puts inspect aSource.repNodes
         #Utils.poolCall(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
         Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
     	Enum.map(aSource.children, &Signal.propagate(Map.get(aSource.routing, &1), &1, message))

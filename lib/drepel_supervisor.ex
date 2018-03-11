@@ -16,6 +16,7 @@ defmodule Drepel.Supervisor do
             {Task.Supervisor, name: Task.Spawner},
             {Store, name: Store},
             {Checkpoint, name: Checkpoint},
+            {Balancer, name: Balancer}
         ]
         Supervisor.init(children, strategy: :one_for_one)
     end

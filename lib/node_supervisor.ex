@@ -49,6 +49,7 @@ defmodule Node.Supervisor do
 	def handle_info({:nodedown, nodeName}, state) do
 		# Stop stats sampling
 		Drepel.Stats.stopSampling()
+		Balancer.stop()
 		# Stop nodes (sources and signals)
 		supervisors = [Source.Supervisor, EventSource.Supervisor, Signal.Supervisor]
 		Enum.map(supervisors, &stopChildren(&1))

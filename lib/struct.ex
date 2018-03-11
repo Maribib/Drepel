@@ -3,8 +3,8 @@ defmodule Sentinel do
 end
 
 defmodule Message do
-    @enforce_keys [:source, :sender, :value, :timestamp, :chckptId]
-    defstruct [:source, :sender, :value, :timestamp, :chckptId]
+    @enforce_keys [:source, :sender, :value, :chckptId]
+    defstruct [:source, :sender, :value, :chckptId]
 end
 
 defmodule ChckptMessage do
