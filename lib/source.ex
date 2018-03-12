@@ -32,7 +32,6 @@ defmodule Source do
     end
 
     def init({%__MODULE__{}=aSource, messages}) do
-        IO.puts "restarted"
         Process.flag(:trap_exit, true)
         chckptTimer = if aSource.chckptInterval>0 do
             Process.send_after(aSource.id, :checkpoint, aSource.chckptInterval)

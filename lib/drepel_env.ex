@@ -1,5 +1,6 @@
 require Signal
 require MockNode
+require Logger
 
 defmodule Drepel.Env do
     defstruct [ id: 1, sources: [], nodes: %{}, clustNodes: [], 
@@ -155,10 +156,10 @@ defmodule Drepel.Env do
         |> Enum.uniq()
     end
 
-    def resetStats(routing, leader) do
+    def resetStats(routing) do
         clustNodesToGraphNode = Map.to_list(routing) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
         Enum.map(clustNodesToGraphNode, fn {clustNode, graphNodes} -> 
-            Drepel.Stats.reset(clustNode, graphNodes, leader) 
+            Drepel.Stats.reset(clustNode, graphNodes) 
         end)
     end
 
@@ -247,7 +248,7 @@ defmodule Drepel.Env do
         Enum.filter(clustNodes, &(&1!=node()))
         |> Enum.map(&Drepel.Env.replicate(&1, env))
         # reset stats
-        resetStats(env.routing, leader)
+        resetStats(env.routing)
         # reset stores
         Enum.map(clustNodes, &Store.reset(&1))
         # reset checkpointing
@@ -279,6 +280,7 @@ defmodule Drepel.Env do
         end)
         Enum.map(clustNodes, &Drepel.Stats.startSampling(&1))
         Balancer.reset(leader, clustNodes)
+        Logger.info "system started"
         {:reply, :ok, %{ env | clustNodes: clustNodes } }
     end
 
@@ -317,7 +319,7 @@ defmodule Drepel.Env do
         # compute new routing table
         newRouting = computeNewRouting(env, nodesDown)
         # reset stats
-        resetStats(newRouting, leader)
+        resetStats(newRouting)
         # reset checkpointing
         Checkpoint.reset(leader, listSinks(env), clustNodes)
         # restart all signals
@@ -326,6 +328,7 @@ defmodule Drepel.Env do
         restartSources(env, chckptId, nodesDown, clustNodes, newRouting)
         Enum.map(clustNodes, &Drepel.Stats.startSampling(&1))
         Balancer.reset(clustNodes)
+        Logger.info "system restarted"
         { :reply, :ok, env}
     end
 

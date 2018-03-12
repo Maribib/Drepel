@@ -1,9 +1,7 @@
 defmodule Drepel.Stats do
-    defstruct [ :snapshot, :leader, :processes, :lastIn, :runningTime, msgQ: %{} ]
+    defstruct [ :snapshot, :processes, :lastIn, :runningTime, msgQ: %{}, stopped: true ]
 
     use GenServer
-
-    @samplingRate 1000
 
     def sampleSchedulers do
         Enum.sort(:erlang.statistics(:scheduler_wall_time))
@@ -23,8 +21,8 @@ defmodule Drepel.Stats do
         GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def reset(node, signals, leader) do
-    	GenServer.call({__MODULE__, node}, {:reset, signals, leader})
+    def reset(node, signals) do
+    	GenServer.call({__MODULE__, node}, {:reset, signals})
     end
 
     def getReport(node) do
@@ -50,15 +48,14 @@ defmodule Drepel.Stats do
         { :ok, %__MODULE__{} }
     end
 
-    def handle_call({:reset, processes, leader}, _from, _oldStats) do
+    def handle_call({:reset, processes}, _from, _oldStats) do
     	{ 
             :reply, 
             :ok, 
             %__MODULE__{
                 processes: processes,
-                leader: leader,
                 runningTime: Enum.reduce(processes, %{}, &Map.put(&2, &1, 0)),
-                lastIn: Enum.reduce(processes, %{}, &Map.put(&2, &1, nil))
+                lastIn: %{},
                 #msgQ: Enum.reduce(signals, %{}, &Map.put(&2, &1, []))
             } 
         }
@@ -82,7 +79,7 @@ defmodule Drepel.Stats do
             Process.whereis(id)
             |> :erlang.trace(true, [:running, :timestamp]) 
         end)
-        { :reply, :ok, %{ state | snapshot: sampleSchedulers() } }
+        { :reply, :ok, %{ state | snapshot: sampleSchedulers(), stopped: false } }
     end
 
     def handle_call(:stopSampling, _from, state) do
@@ -90,21 +87,23 @@ defmodule Drepel.Stats do
             Process.whereis(id)
             |> :erlang.trace(false, [:running, :timestamp]) 
         end)
-        { :reply, :ok, state }
+        { :reply, :ok, %{ state | stopped: true } }
     end
 
-    def handle_info({:trace_ts, pid, :in, _, timestamp}, state) do
-        {:registered_name, name} = Process.info(pid, :registered_name)
-        { :noreply, put_in(state.lastIn[name], timestamp) }
+    def handle_info({:trace_ts, _, _, _, _}, %__MODULE__{stopped: true}=state) do
+        { :noreply, state }
     end
 
-    def handle_info({:trace_ts, pid, :out, _, {_, outSec, outUSec}}, state) do
-        {:registered_name, name} = Process.info(pid, :registered_name)
-        {_, inSec, inUSec} = state.lastIn[name]
-        { 
+    def handle_info({:trace_ts, pid, :in, _, timestamp}, %__MODULE__{stopped: false}=state) do
+        { :noreply, put_in(state.lastIn[pid], timestamp) }
+    end
+
+    def handle_info({:trace_ts, pid, :out, _, {_, outSec, outUSec}}, %__MODULE__{stopped: false}=state) do
+        {_, inSec, inUSec} = state.lastIn[pid]
+        {
             :noreply, 
-            update_in(state.runningTime[name], fn cur -> 
-                cur + 1000000*(outSec - inSec) + (outUSec-inUSec)
+            update_in(state.runningTime[pid], fn cur -> 
+                (is_nil(cur) && 0 || cur) + 1000000*(outSec - inSec) + (outUSec-inUSec)
             end) 
         }
     end

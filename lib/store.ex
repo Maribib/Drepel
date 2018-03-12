@@ -1,3 +1,5 @@
+require Logger
+
 defmodule Store do
 
     use GenServer
@@ -13,7 +15,11 @@ defmodule Store do
     end
 
     def put(nodeName, chckptId, message) do
-    	GenServer.call({__MODULE__, nodeName}, {:put, chckptId, message})
+    	try do
+			GenServer.call({__MODULE__, nodeName}, {:put, chckptId, message})
+		catch
+			:exit, msg -> Logger.error("connection lost: #{inspect msg}")
+		end
     end
 
     def get(id, chckptId) do
@@ -64,7 +70,7 @@ defmodule Store do
 
     def handle_call({:getMessages, id, chckptId}, _from, store) do
     	messages = Enum.sort(Map.keys(store)) 
-    	|> Enum.filter(&(&1>=chckptId))
+    	|> Enum.filter(&(is_nil(chckptId) || &1>=chckptId))
     	|> Enum.reduce([], fn chckptId, acc -> 
     		chckpt = Map.get(store, chckptId)
     		if Map.has_key?(chckpt, id) do

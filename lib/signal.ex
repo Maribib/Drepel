@@ -4,7 +4,7 @@ defmodule Signal do
     defstruct [ :id, :fct, :args, :dependencies, :buffs, :default,
     :chckpts, :leader,
     parents: [], children: [], startReceived: 0, state: %Sentinel{}, 
-    hasChildren: false, chckptId: 0, repNodes: [], routing: %{} ]
+    hasChildren: false, repNodes: [], routing: %{} ]
 
     use GenServer, restart: :transient
 
@@ -34,20 +34,20 @@ defmodule Signal do
         GenServer.cast({id, aNode}, {:propagateChckpt, message})
     end
 
-    def unblock(aSignal) do
+    def unblock(aSignal, chckptId) do
         Enum.reduce(aSignal.buffs, aSignal, fn {source, _}, aSignal -> 
-            _unblock(aSignal, source)
+            _unblock(aSignal, source, chckptId)
         end)
     end
 
-    def _unblock(aSignal, source) do
+    def _unblock(aSignal, source, chckptId) do
         ready = Enum.reduce_while(aSignal.buffs[source], true, fn {_, queue}, acc ->
-            ready = (!:queue.is_empty(queue)) && (:queue.head(queue).chckptId==aSignal.chckptId)
+            ready = (!:queue.is_empty(queue)) && (:queue.head(queue).chckptId==chckptId)
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
             aSignal = consume(aSignal, source)
-            _unblock(aSignal, source)
+            _unblock(aSignal, source, chckptId)
         else
             aSignal
         end
@@ -121,7 +121,7 @@ defmodule Signal do
             end
             chckpts = Enum.reduce(aSignal.chckpts, %{}, fn {k, v}, acc -> Map.put(acc, k, v-1) end)
             Enum.map(aSignal.children, &__MODULE__.propagateChckpt(Map.get(aSignal.routing, &1), &1, %{ message | sender: aSignal.id}))
-            aSignal = unblock(%{ aSignal | chckpts: chckpts, chckptId: message.id })
+            aSignal = unblock(%{ aSignal | chckpts: chckpts }, message.id)
             { :noreply, aSignal }
         else
             { :noreply, aSignal }
@@ -132,7 +132,7 @@ defmodule Signal do
         #IO.puts "propagateDefault #{inspect aSignal.id} #{inspect sender}"
         aSignal = %{ aSignal | args: %{ aSignal.args | sender => parentDefault } }
         aSignal = if Enum.count(aSignal.args, fn {_, arg} -> arg==%Sentinel{} end)==0 do
-            if length(aSignal.children)>0 do
+            aSignal = if length(aSignal.children)>0 do
                 args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
                 { default, state } = case aSignal.state do
                     %Sentinel{} -> 
@@ -147,6 +147,9 @@ defmodule Signal do
                 Enum.map(aSignal.parents, &send({&1, Map.get(aSignal.routing, &1)}, :start))
                 aSignal
             end
+            # copy initial state in case of failure before first checkpoint completion
+            Enum.map(aSignal.repNodes, &Store.put(&1, -1, aSignal))
+            aSignal
         else
             aSignal
         end
@@ -154,8 +157,8 @@ defmodule Signal do
     end
 
     def handle_info(:start, aSignal) do
-        #IO.puts "start #{inspect aSignal.id} "
         aSignal = %{ aSignal | startReceived: aSignal.startReceived+1 }
+        # check if all "start" messages are received
         if length(aSignal.children)==aSignal.startReceived do
             Enum.map(aSignal.parents, &send({&1, Map.get(aSignal.routing, &1)}, :start))
         end

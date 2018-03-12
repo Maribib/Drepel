@@ -1,5 +1,7 @@
+require Logger
+
 defmodule Checkpoint do
-    defstruct [lastCompleted: nil, clustNodes: [], buffs: %{}]
+    defstruct [lastCompleted: -1, clustNodes: [], buffs: %{}]
 
     use GenServer
     
@@ -55,6 +57,7 @@ defmodule Checkpoint do
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
+            Logger.info("checkpoint #{inspect chckptId} completed")
             Enum.filter(state.clustNodes, &(&1!=node()))
             |> Enum.map(&Checkpoint.setLastCompleted(&1, chckptId))
             Enum.map(state.clustNodes, &Store.clean(&1, chckptId-1))

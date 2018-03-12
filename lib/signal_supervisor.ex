@@ -27,7 +27,6 @@ defmodule Signal.Supervisor do
                 aSignal = %{ aSignal | 
                     repNodes: repNodes,
                     routing: routing, 
-                    chckptId: chckptId+1,
                     leader: leader
                 }
                 Supervisor.start_child(__MODULE__, [aSignal])
