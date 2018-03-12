@@ -34,20 +34,20 @@ defmodule Signal do
         GenServer.cast({id, aNode}, {:propagateChckpt, message})
     end
 
-    def purge(aSignal) do
-        Enum.reduce(aSignal.buffs, aSignal, fn {source, sourceBuffs}, aSignal -> 
-            _purge(aSignal, source, sourceBuffs)
+    def unblock(aSignal) do
+        Enum.reduce(aSignal.buffs, aSignal, fn {source, _}, aSignal -> 
+            _unblock(aSignal, source)
         end)
     end
 
-    def _purge(aSignal, source, sourceBuffs) do
-        ready = Enum.reduce_while(sourceBuffs, true, fn {_, queue}, acc ->
-            ready = !:queue.is_empty(queue) && :queue.head(queue).chckptId==aSignal.chckptId
+    def _unblock(aSignal, source) do
+        ready = Enum.reduce_while(aSignal.buffs[source], true, fn {_, queue}, acc ->
+            ready = (!:queue.is_empty(queue)) && (:queue.head(queue).chckptId==aSignal.chckptId)
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
             aSignal = consume(aSignal, source)
-            _purge(aSignal, source, sourceBuffs)
+            _unblock(aSignal, source)
         else
             aSignal
         end
@@ -121,7 +121,7 @@ defmodule Signal do
             end
             chckpts = Enum.reduce(aSignal.chckpts, %{}, fn {k, v}, acc -> Map.put(acc, k, v-1) end)
             Enum.map(aSignal.children, &__MODULE__.propagateChckpt(Map.get(aSignal.routing, &1), &1, %{ message | sender: aSignal.id}))
-            aSignal = purge(%{ aSignal | chckpts: chckpts, chckptId: message.id })
+            aSignal = unblock(%{ aSignal | chckpts: chckpts, chckptId: message.id })
             { :noreply, aSignal }
         else
             { :noreply, aSignal }
