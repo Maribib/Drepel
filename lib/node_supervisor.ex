@@ -48,6 +48,7 @@ defmodule Node.Supervisor do
 
 	def handle_info({:nodedown, nodeName}, state) do
 		Balancer.stop()
+		Checkpoint.stopCheckpointing()
 		# Stop stats sampling
 		Drepel.Stats.stopSampling()
 		# Stop nodes (sources and signals)

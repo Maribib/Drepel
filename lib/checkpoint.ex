@@ -1,7 +1,8 @@
 require Logger
 
 defmodule Checkpoint do
-    defstruct [lastCompleted: -1, clustNodes: [], buffs: %{}]
+    defstruct [:timer, :sourcesRouting, :chckptInterval, :waiting,
+    lastCompleted: -1, chckptId: 0, clustNodes: [], buffs: %{}]
 
     use GenServer
     
@@ -11,8 +12,8 @@ defmodule Checkpoint do
        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def reset(nodeName, sinks, clustNodes) do
-    	GenServer.call({__MODULE__, nodeName}, {:reset, sinks, clustNodes})
+    def reset(nodeName, sinks, clustNodes, sourcesRouting, chckptInterval) do
+    	GenServer.call({__MODULE__, nodeName}, {:reset, sinks, clustNodes, sourcesRouting, chckptInterval})
     end
 
     def completed(nodeName, sink, chckptId) do
@@ -27,17 +28,52 @@ defmodule Checkpoint do
         GenServer.call(__MODULE__, :lastCompleted)
     end
 
+    def startCheckpointing do
+        GenServer.call(__MODULE__, :startCheckpointing)
+    end
+
+    def startCheckpointing(node) do
+        GenServer.call({__MODULE__, node}, :startCheckpointing)
+    end
+
+    def stopCheckpointing do
+        GenServer.call(__MODULE__, :stopCheckpointing)
+    end
+
+    def balance() do
+        GenServer.cast(__MODULE__, :balance)
+    end
+
+    def injectAndWaitForCompletion(args) do
+        GenServer.call(__MODULE__, {:injectAndWaitForCompletion, args})
+    end
+
     # Server API
 
     def init(:ok) do
         { :ok, %__MODULE__{} }
     end
 
-    def handle_call({:reset, sinks, clustNodes}, _from, state) do
-    	{ :reply, :ok, 
+    def handle_call(:startCheckpointing, _from, state) do
+        { :reply, :ok, %{ state | 
+            chckptId: state.lastCompleted==-1 && 0 || state.lastCompleted+1,
+            timer: Process.send_after(self(), :injectChckpt, state.chckptInterval)
+        } }
+    end
+
+    def handle_call(:stopCheckpointing, _from, state) do
+        Utils.cancelTimer(state.timer)
+        { :reply, :ok, %{ state | timer: nil } }
+    end
+
+    def handle_call({:reset, sinks, clustNodes, sourcesRouting, chckptInterval}, _from, state) do
+        { :reply, :ok, 
             %{ state |
                 buffs: Enum.reduce(sinks, %{}, &Map.put(&2, &1, 0)),
-                clustNodes: clustNodes
+                clustNodes: clustNodes,
+                sourcesRouting: sourcesRouting,
+                chckptInterval: chckptInterval,
+                waiting: nil
             }
         }
     end
@@ -48,6 +84,14 @@ defmodule Checkpoint do
 
     def handle_call(:lastCompleted, _from, state) do
         { :reply, state.lastCompleted, state }
+    end
+
+    def handle_call({:injectAndWaitForCompletion, args}, _from, state) do
+        Enum.map(state.sourcesRouting, &GenServer.cast(&1, {:checkpoint, state.chckptId}))
+        { :reply, :ok, %{ state |
+            chckptId: state.chckptId+1,
+            waiting: %{ id: state.chckptId, args: args }
+        } }
     end
 
     def handle_cast({:completed, sink, chckptId}, state) do
@@ -61,6 +105,12 @@ defmodule Checkpoint do
             Enum.filter(state.clustNodes, &(&1!=node()))
             |> Enum.map(&Checkpoint.setLastCompleted(&1, chckptId))
             Enum.map(state.clustNodes, &Store.clean(&1, chckptId-1))
+            state = if !is_nil(state.waiting) && state.waiting.id==chckptId do
+                apply(&Drepel.Env.balance/3, state.waiting.args)
+                %{ state | waiting: nil }
+            else
+                state
+            end
             {   
                 :noreply,
                 %{ state |
@@ -73,6 +123,14 @@ defmodule Checkpoint do
         else
             {:noreply, state }
         end
+    end
+
+    def handle_info(:injectChckpt, state) do
+        Enum.map(state.sourcesRouting, &GenServer.cast(&1, {:checkpoint, state.chckptId}))
+        { :noreply, %{ state | 
+            chckptId: state.chckptId+1,
+            timer: Process.send_after(self(), :injectChckpt, state.chckptInterval)
+        } }
     end
 
 end

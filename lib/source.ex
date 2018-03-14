@@ -2,9 +2,9 @@ require Signal
 
 defmodule Source do 
 	@enforce_keys [ :id, :refreshRate, :fct, :default ]
-	defstruct [ :id, :refreshRate, :fct, :default, :dependencies, :chckptInterval, 
-    :clustNodes, :repNodes, :chckptInterval,
-	children: [], startReceived: 0, prodTimer: nil, repNodes: [], chckptTimer: nil,
+	defstruct [ :id, :refreshRate, :fct, :default, :dependencies, 
+    :clustNodes, :repNodes,
+	children: [], startReceived: 0, prodTimer: nil, repNodes: [],
     chckptId: 0, routing: %{}]
 
 	use GenServer, restart: :transient
@@ -33,14 +33,11 @@ defmodule Source do
 
     def init({%__MODULE__{}=aSource, messages}) do
         Process.flag(:trap_exit, true)
-        chckptTimer = if aSource.chckptInterval>0 do
-            Process.send_after(aSource.id, :checkpoint, aSource.chckptInterval)
-        else
-            nil
-        end 
         chckptId = Enum.reduce(messages, aSource.chckptId, fn message, acc ->
             {propFct, chckptId} = case message do
-                %ChckptMessage{id: id} -> {&Signal.propagateChckpt/3, id+1}
+                %ChckptMessage{id: id} -> 
+                    IO.puts "replayed #{id}"
+                    {&Signal.propagateChckpt/3, id+1}
                 %Message{} -> {&Signal.propagate/3, acc}
             end
             Enum.map(aSource.children, &propFct.(Map.get(aSource.routing, &1), &1, message))
@@ -48,14 +45,12 @@ defmodule Source do
         end)
         {:ok, %{ aSource |
             prodTimer: Process.send_after(aSource.id, :produce, aSource.refreshRate),
-            chckptTimer: chckptTimer,
             chckptId: chckptId
         } }
     end
 
     def terminate(_reason, aSource) do
-        timers = [:prodTimer, :chckptTimer]
-        Enum.map(timers, &Utils.cancelTimer(Map.get(aSource, &1)))
+        Utils.cancelTimer(aSource.prodTimer)
     end
 
     def handle_info(:produce, aSource) do
@@ -77,33 +72,40 @@ defmodule Source do
         { :noreply, s }
     end
 
-    def handle_info(:checkpoint, aSource) do
-        chckptTimer = Process.send_after(aSource.id, :checkpoint, aSource.chckptInterval)
-        message = %ChckptMessage{ 
-            id: aSource.chckptId,
-            sender: aSource.id 
-        }
-        Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
-        Enum.map(aSource.children, &Signal.propagateChckpt(Map.get(aSource.routing, &1), &1, message))
-        { :noreply, %{ aSource |
-            chckptTimer: chckptTimer,
-            chckptId: aSource.chckptId+1
-        } }
-    end
-
     def handle_info(:start, aSource) do
     	#IO.puts "start #{inspect aSource.id}"
         aSource = %{ aSource | startReceived: aSource.startReceived+1 }
         if length(aSource.children)==aSource.startReceived do
             prodTimer = Process.send_after(aSource.id, :produce, aSource.refreshRate)
-            chckptTimer = Process.send_after(aSource.id, :checkpoint, aSource.chckptInterval)
             { :noreply, %{ aSource | 
                 prodTimer: prodTimer,
-                chckptTimer: chckptTimer
             } }
         else
         	{ :noreply, aSource }
         end
     end
 
+    def handle_cast({:checkpoint, chckptId}, aSource) do
+        if chckptId>aSource.chckptId do
+            message = %ChckptMessage{ 
+                id: chckptId,
+                sender: aSource.id 
+            }
+            Enum.map(aSource.repNodes, &Store.put(&1, chckptId-1, message))
+            Enum.map(aSource.children, &Signal.propagateChckpt(Map.get(aSource.routing, &1), &1, message))
+            { :noreply, %{ aSource |
+                chckptId: chckptId
+            } }
+        else
+            { :noreply, aSource }
+        end
+    end
+
+    def handle_call({:addRepNode, node}, _from, aSource) do 
+        if Enum.member?(aSource.repNodes, node) do
+            { :reply, :already, aSource }
+        else
+            { :reply, :ok, update_in(aSource.repNodes, &(&1 ++ [node])) }
+        end
+    end
 end

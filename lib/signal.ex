@@ -165,4 +165,12 @@ defmodule Signal do
         { :noreply, aSignal }
     end 
 
+    def handle_call({:addRepNode, node}, _from, aSignal) do 
+        if Enum.member?(aSignal.repNodes, node) do
+            { :reply, :already, aSignal }
+        else
+            { :reply, :ok, update_in(aSignal.repNodes, &(&1 ++ [node])) }
+        end
+    end
+
 end

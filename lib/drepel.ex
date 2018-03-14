@@ -12,6 +12,15 @@ defmodule Drepel do
         Drepel.Env.stopNodes()
     end
 
+    def test() do
+        s1 = Drepel.milliseconds(3) 
+        s2 = Drepel.milliseconds(2, node: :"bar@MB")
+        s3 = Drepel.milliseconds(2, node: :"bar@MB")
+        x1 = Drepel.signal([s1, s2], fn x,y -> x+y end, node: :"bar@MB")
+        x2 = Drepel.signal([s2, s3], fn y,z -> y*y+z*z end, node: :"bar@MB")
+        Drepel.run()
+    end
+
     def resetEnv do
         Drepel.Env.reset()
     end

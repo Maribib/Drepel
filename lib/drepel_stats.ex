@@ -1,5 +1,6 @@
 defmodule Drepel.Stats do
-    defstruct [ :snapshot, :processes, :lastIn, :runningTime, msgQ: %{}, stopped: true ]
+    defstruct [ :snapshot, :processes, :lastIn, :runningTime, :pidToId, 
+    msgQ: %{}, stopped: true ]
 
     use GenServer
 
@@ -54,7 +55,7 @@ defmodule Drepel.Stats do
             :ok, 
             %__MODULE__{
                 processes: processes,
-                runningTime: Enum.reduce(processes, %{}, &Map.put(&2, &1, 0)),
+                runningTime: %{},
                 lastIn: %{},
                 #msgQ: Enum.reduce(signals, %{}, &Map.put(&2, &1, []))
             } 
@@ -66,20 +67,27 @@ defmodule Drepel.Stats do
         utilization = computeUtilization(state.snapshot, snapshot)
     	{ 
             :reply, 
-            { utilization, state.runningTime }, 
-            %{ state | 
-                snapshot: snapshot,
-                runningTime: Enum.reduce(state.processes, %{}, &Map.put(&2, &1, 0))
-            } 
+            { 
+                utilization, 
+                Enum.reduce(state.runningTime, %{}, fn {pid, value}, acc -> 
+                    Map.put(acc, state.pidToId[pid], value)
+                end)
+            },
+            %{ state | snapshot: snapshot }
         }
     end
 
     def handle_call(:startSampling, _from, state) do
-        Enum.map(state.processes, fn id ->
-            Process.whereis(id)
-            |> :erlang.trace(true, [:running, :timestamp]) 
+        pidToId = Enum.reduce(state.processes, %{}, fn id, acc ->
+            pid = Process.whereis(id)
+            pid |> :erlang.trace(true, [:running, :timestamp]) 
+            Map.put(acc, pid, id)
         end)
-        { :reply, :ok, %{ state | snapshot: sampleSchedulers(), stopped: false } }
+        { :reply, :ok, %{ state | 
+            snapshot: sampleSchedulers(), 
+            stopped: false,
+            pidToId: pidToId
+        } }
     end
 
     def handle_call(:stopSampling, _from, state) do
@@ -101,7 +109,7 @@ defmodule Drepel.Stats do
     def handle_info({:trace_ts, pid, :out, _, {_, outSec, outUSec}}, %__MODULE__{stopped: false}=state) do
         {_, inSec, inUSec} = state.lastIn[pid]
         {
-            :noreply, 
+            :noreply,
             update_in(state.runningTime[pid], fn cur -> 
                 (is_nil(cur) && 0 || cur) + 1000000*(outSec - inSec) + (outUSec-inUSec)
             end) 
