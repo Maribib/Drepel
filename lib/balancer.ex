@@ -34,6 +34,10 @@ defmodule Balancer do
         GenServer.call(__MODULE__, :stop)
     end
 
+    def join(node, nodeName) do
+        GenServer.call({__MODULE__, node}, {:join, nodeName})
+    end
+
     # Server API
 
     def init(:ok) do
@@ -51,6 +55,10 @@ defmodule Balancer do
     def handle_call(:stop, _from, state) do
         Utils.cancelTimer(state.timer)
         { :reply, :ok, %{ state | timer: nil } }
+    end
+
+    def handle_call({:join, node}, _from, state) do
+        { :reply, :ok, %{ state | clustNodes: state.clustNodes ++ [node] } }
     end
 
     def computeTotalUtilByNode(reports) do 
@@ -85,7 +93,7 @@ defmodule Balancer do
 
     def handle_info(:balance, state) do
         reports = Enum.reduce(state.clustNodes, %{}, &Map.put(&2, &1, Drepel.Stats.getReport(&1)))
-        #Logger.info(inspect reports)
+        Logger.info(inspect reports)
         meanUtilByNode = computeMeanUtilByNode(reports)
         {{minNode, minMeanUtil}, {maxNode, maxMeanUtil}} = Enum.min_max_by(meanUtilByNode, &elem(&1, 1))
         totalRunnningTime = computeTotalRunningTime(reports[maxNode])

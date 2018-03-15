@@ -9,18 +9,16 @@ defmodule Node.Supervisor do
        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
+    def monitor(clustNodes) do
+    	GenServer.call(__MODULE__, {:monitor, clustNodes})
+    end
+
     def monitor(aNode, clustNodes) do
 		GenServer.call({__MODULE__, aNode}, {:monitor, clustNodes})
     end
 
-    def stopChildren(aSupervisor) do
-    	Enum.map(Supervisor.which_children(aSupervisor), fn {_, pid, _, _} ->
-			Supervisor.terminate_child(aSupervisor, pid)
-		end)
-    end
-
-    def stop(aNode) do
-    	GenServer.cast({__MODULE__ ,aNode}, {:stop, node()})
+    def stop(aNode, nodeDown) do
+    	GenServer.cast({__MODULE__ ,aNode}, {:stop, node(), nodeDown})
     end
 
     # Server API
@@ -30,19 +28,28 @@ defmodule Node.Supervisor do
     end
 
 	def handle_call({:monitor, clustNodes}, _from, state) do
+		IO.puts "monitor #{inspect state.clustNodes}"
+		IO.puts "monitor #{inspect clustNodes}"
 		Enum.map(state.clustNodes -- clustNodes, &Node.monitor(&1, false))
 		Enum.map(clustNodes -- state.clustNodes, &Node.monitor(&1, true))
 		{ :reply, :ok, %{ state | clustNodes: clustNodes } }
 	end
 
-	def handle_cast({:stop, aNode}, state) do
+	def handle_cast({:stop, aNode, nodeDown}, state) do
 		stopMessages = state.stopMessages ++ [aNode]
+		nodesDown = Enum.uniq(state.nodesDown ++ [nodeDown])
 		if length(state.clustNodes--stopMessages)==0 do
 			chckptId = Checkpoint.lastCompleted()
-			Drepel.Env.restore(chckptId, state.clustNodes, state.nodesDown)
-			{ :noreply, %{ state | stopMessages: []} }
+			Drepel.Env.restore(chckptId, state.clustNodes, nodesDown)
+			{ :noreply, %{ state | 
+				stopMessages: [], 
+				nodesDown: []
+			} }
 		else
-			{ :noreply, %{ state | stopMessages: stopMessages} }
+			{ :noreply, %{ state | 
+				stopMessages: stopMessages, 
+				nodesDown: nodesDown
+			} }
 		end
 	end
 
@@ -53,14 +60,13 @@ defmodule Node.Supervisor do
 		Drepel.Stats.stopSampling()
 		# Stop nodes (sources and signals)
 		supervisors = [Source.Supervisor, EventSource.Supervisor, Signal.Supervisor]
-		Enum.map(supervisors, &stopChildren(&1))
+		Enum.map(supervisors, &Utils.stopChildren(&1))
 		# Elect and alert new leader
 		clustNodes = state.clustNodes -- [nodeName]
 		leader = Enum.at(clustNodes, 0)
-		stop(leader)
+		stop(leader, nodeName)
 		{:noreply, %{ state | 
-			clustNodes: clustNodes, 
-			nodesDown: state.nodesDown ++ [nodeName]
+			clustNodes: clustNodes
 		} }
 	end
 

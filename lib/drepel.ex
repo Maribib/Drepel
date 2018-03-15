@@ -114,5 +114,13 @@ defmodule Drepel do
         res
     end
 
+    def join(nodes) when is_list(nodes) do
+        Drepel.Env.join(nodes)
+    end 
+
+    def join(node) do
+        join([node])
+    end
+
 end
 

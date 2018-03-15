@@ -23,23 +23,23 @@ defmodule Drepel.Env do
     end
 
     def createSource(refreshRate, fct, default, opts) do
-        nodeName = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createSource, refreshRate, fct, default, nodeName})
+        node = :proplists.get_value(:node, opts, node())
+        GenServer.call(__MODULE__, {:createSource, refreshRate, fct, default, node})
     end
 
     def createEventSource(port, default, opts) do
-        nodeName = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createEventSource, port, default, nodeName})
+        node = :proplists.get_value(:node, opts, node())
+        GenServer.call(__MODULE__, {:createEventSource, port, default, node})
     end
 
     def createSignal(parents, fct, opts) do
-        nodeName = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createSignal, parents, fct, %Sentinel{}, nodeName})
+        node = :proplists.get_value(:node, opts, node())
+        GenServer.call(__MODULE__, {:createSignal, parents, fct, %Sentinel{}, node})
     end
 
     def createStatedNode(parents, fct, initState, opts) do
-        nodeName = :proplists.get_value(:node, opts, node())    
-        GenServer.call(__MODULE__, {:createSignal, parents, fct, initState, nodeName})
+        node = :proplists.get_value(:node, opts, node())    
+        GenServer.call(__MODULE__, {:createSignal, parents, fct, initState, node})
     end
 
     def balance(from, to, ids) do
@@ -67,15 +67,19 @@ defmodule Drepel.Env do
         end)
     end
 
-    defp stopAll(supervisor, nodeIds, routing) do
-        tasks = Enum.map(nodeIds, fn id ->
-            node = Map.get(routing, id)
+    def stopAll(env) do
+        supervisors = [Source.Supervisor, EventSource.Supervisor, Signal.Supervisor]
+        Enum.map(supervisors, &stopAll(&1, env.clustNodes))
+    end
+
+    defp stopAll(supervisor, nodes) do
+        Enum.map(nodes, fn node ->
             Task.Supervisor.async({Task.Spawner, node}, fn ->
-                pid = Process.whereis(id)
-                Supervisor.terminate_child(supervisor, pid)
+                Supervisor.which_children(supervisor)
+                |> Enum.map(&Supervisor.terminate_child(supervisor, elem(&1, 1)))
             end)
         end)
-        Enum.map(tasks, &Task.await(&1))
+        |> Enum.map(&Task.await(&1))
     end
 
     def listSinks(env) do
@@ -84,8 +88,8 @@ defmodule Drepel.Env do
         end)
     end
 
-    def replicate(nodeName, env) do
-        GenServer.call({__MODULE__, nodeName}, {:replicate, env})
+    def replicate(node, env) do
+        GenServer.call({__MODULE__, node}, {:replicate, env})
     end
 
     def restore(chckptId, clustNodes, nodesDown) do
@@ -93,17 +97,13 @@ defmodule Drepel.Env do
     end
 
     def computeNewRouting(env, nodesDown) do
+        IO.puts inspect env.routing
+        IO.puts inspect nodesDown
         oldClustNodes = Map.values(env.routing) |> Enum.uniq()
         Enum.reduce(env.routing, %{}, fn {id, node}, acc ->
             if Enum.member?(nodesDown, node) do
                 repNodes = computeRepNodes(oldClustNodes, env.repFactor, node)
-                newNode = Enum.reduce_while(repNodes, nil, fn repNode, acc ->
-                    if Enum.member?(nodesDown, repNode) do
-                        { :cont, acc }
-                    else
-                        { :halt, repNode }
-                    end
-                end)
+                newNode = Enum.at(repNodes -- nodesDown, 0)
                 Map.put(acc, id, newNode)
             else
                 Map.put(acc, id, node)
@@ -111,15 +111,10 @@ defmodule Drepel.Env do
         end)
     end
 
-    def restartSignals(env, chckptId, nodesDown, clustNodes) do
+    def restartSignals(env, chckptId, clustNodes) do
         leader = Enum.at(clustNodes, 0)
         Enum.map(Map.keys(env.nodes) -- env.sources, fn id ->
             node = Map.get(env.routing, id)
-            node = if Enum.member?(nodesDown, node) do
-                Map.get(env.routing, id)
-            else
-                node
-            end
             Signal.Supervisor.restart( 
                 node,
                 id, 
@@ -131,14 +126,9 @@ defmodule Drepel.Env do
         end)
     end
 
-    def restartSources(env, chckptId, nodesDown, clustNodes) do
+    def restartSources(env, chckptId, clustNodes) do
         Enum.map(env.sources, fn id ->
             node = Map.get(env.routing, id)
-            node = if Enum.member?(nodesDown, node) do
-                Map.get(env.routing, id)
-            else
-                node
-            end
             aSource = Map.get(env.nodes, id)
             sourceSupervisorCls = Module.concat(aSource.__struct__, Supervisor)
             sourceSupervisorCls.restart(
@@ -154,6 +144,7 @@ defmodule Drepel.Env do
     end
 
     def computeRepNodes(clustNodes, repFactor, node) do
+        IO.puts inspect clustNodes
         nbNodes = length(clustNodes)
         pos = Enum.find_index(clustNodes, fn clustNode -> clustNode==node end)
         Enum.map(pos..pos+repFactor, fn i -> Enum.at(clustNodes, rem(i, nbNodes)) end)
@@ -171,10 +162,53 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, :test)
     end
 
+    def join(nodes) do
+        GenServer.call(__MODULE__, {:join, nodes})
+    end
+
+    def discover(node) do
+        try do
+            GenServer.call({__MODULE__, node}, {:discover, node()})
+        catch
+            _ -> :error
+        end
+    end
+
+    def addClustNode(node, clustNode) do
+        GenServer.call({__MODULE__, node}, {:addClustNode, clustNode})
+    end
+
     # Server API
 
     def init(:ok) do
         { :ok, %__MODULE__{} }
+    end
+
+    def handle_call({:addClustNode, clustNode}, _from, env) do
+        clustNodes = env.clustNodes ++ [clustNode]
+        Node.Supervisor.monitor(clustNodes)
+        { :reply, :ok, %{ env | clustNodes: clustNodes } }
+    end
+
+    def handle_call({:discover, clustNode}, _from, env) do
+        leader = Enum.at(env.clustNodes, 0)
+        Balancer.join(leader, clustNode)
+        Node.Supervisor.monitor(env.clustNodes ++ [clustNode])
+        Enum.map(env.clustNodes -- [node()], &__MODULE__.addClustNode(&1, clustNode))
+        { :reply, env, %{ env | clustNodes: env.clustNodes ++ [clustNode] } }
+    end
+
+    def handle_call({:join, nodes}, _from, env) do
+        Drepel.Stats.reset(node(), [])
+        Drepel.Stats.startSampling(node())
+        res = Enum.reduce_while(nodes, nil, fn node, _ ->
+            newEnv = Drepel.Env.discover(node)
+            case newEnv do
+                %__MODULE__{} -> { :halt, env}
+                :error -> { :cont, :error }
+            end
+        end)
+        { :reply, :ok, res }
     end
 
     def handle_call(:reset, _from, _) do
@@ -189,7 +223,7 @@ defmodule Drepel.Env do
         { :reply, :ok, env }
     end
 
-    def handle_call({:createSource, refreshRate, fct, default, nodeName}, _from, env) do
+    def handle_call({:createSource, refreshRate, fct, default, node}, _from, env) do
         id = String.to_atom("node_#{env.id}")
         newSource = %Source{
             id: id, 
@@ -202,12 +236,12 @@ defmodule Drepel.Env do
             id: env.id+1, 
             sources: env.sources ++ [id],
             nodes: Map.put(env.nodes, id, newSource),
-            routing: Map.put(env.routing, id, nodeName)
+            routing: Map.put(env.routing, id, node)
         }
         {:reply, %MockNode{id: id}, env}
     end
 
-    def handle_call({:createEventSource, port, default, nodeName}, _from, env) do
+    def handle_call({:createEventSource, port, default, node}, _from, env) do
         id = String.to_atom("node_#{env.id}")
         newSource = %EventSource{
             id: id, 
@@ -219,12 +253,12 @@ defmodule Drepel.Env do
             id: env.id+1, 
             sources: env.sources ++ [id],
             nodes: Map.put(env.nodes, id, newSource),
-            routing: Map.put(env.routing, id, nodeName)
+            routing: Map.put(env.routing, id, node)
         }
         {:reply, %MockNode{id: id}, env}
     end
 
-    def handle_call({:createSignal, parents, fct, initState, nodeName}, _from, env) do
+    def handle_call({:createSignal, parents, fct, initState, node}, _from, env) do
         id = String.to_atom("node_#{env.id}")
         dependencies = _computeDepedencies(env, parents)
         newSignal = %Signal{ 
@@ -242,7 +276,7 @@ defmodule Drepel.Env do
         env = %{ env |  
             id: env.id+1, 
             nodes: Map.put(env.nodes, id, newSignal),
-            routing: Map.put(env.routing, id, nodeName)
+            routing: Map.put(env.routing, id, node)
         }
         {:reply, %MockNode{id: id}, env}
     end
@@ -297,54 +331,36 @@ defmodule Drepel.Env do
         # stop stats
         Enum.map(env.clustNodes, &Drepel.Stats.stopSampling(&1))
         # stop nodes
-        stopAll(Source.Supervisor, env.sources, env.routing)
-        stopAll(Signal.Supervisor, Map.keys(env.nodes) -- env.sources, env.routing)
-        # get statitics
-        #stats = Enum.map(env.clustNodes, &Drepel.Stats.get(&1))
-        #Enum.map(stats, fn %{latency: %{cnt: cnt, sum: sum, max: max}, works: works} -> 
-        #    avg = cnt>0 && sum/cnt || 0
-        #    work = Enum.map(works, fn {_id, %{cnt: cnt, sum: sum}} -> 
-        #        cnt>0 && sum/cnt || 0
-        #    end) |> Enum.join(" ")
-        #    
-        #    IO.puts "#{work} #{max} #{cnt} #{sum} #{avg}"
-        #end)
-        #Enum.map(stats, fn %{msgQ: msgQ} -> 
-        #    Enum.map(msgQ, fn {signal, samples} -> 
-        #        IO.puts "#{signal} #{Enum.join(samples, " ")}"
-        #    end)
-        #end)
-        #Enum.map(stats, fn %{works: works} -> 
-        #    Enum.map(works, fn {id, %{cnt: cnt, sum: sum}} -> 
-        #        avg = cnt>0 && sum/cnt || 0
-        #        IO.puts "#{inspect id} #{cnt} #{sum} #{avg}"
-        #    end)
-        #end)
+        stopAll(env)
         {:reply, :ok, env}
     end
 
     def handle_call({:restore, chckptId, clustNodes, nodesDown}, _from, env) do
-        leader = Enum.at(clustNodes, 0)
-        # compute new routing table
         newRouting = computeNewRouting(env, nodesDown)
-        env = %{ env | routing: newRouting }
+        IO.puts inspect newRouting
+        env = %{ env | clustNodes: clustNodes, routing: newRouting }
+        _restore(env, chckptId)
+        { :reply, :ok, env }
+    end
+
+    def _restore(env, chckptId) do
+        leader = Enum.at(env.clustNodes, 0)
         # replicate env
-        Enum.filter(clustNodes, &(&1!=node()))
+        Enum.filter(env.clustNodes, &(&1!=node()))
         |> Enum.map(&Drepel.Env.replicate(&1, env))
         # reset stats
-        resetStats(newRouting)
+        resetStats(env.routing)
         # reset checkpointing
-        sourcesRouting = Map.take(newRouting, env.sources)
-        Checkpoint.reset(leader, listSinks(env), clustNodes, sourcesRouting, env.chckptInterval)
+        sourcesRouting = Map.take(env.routing, env.sources)
+        Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
         # restart all signals
-        restartSignals(env, chckptId, nodesDown, clustNodes)
+        restartSignals(env, chckptId, env.clustNodes)
         # restart all sources
-        restartSources(env, chckptId, nodesDown, clustNodes)
-        Enum.map(clustNodes, &Drepel.Stats.startSampling(&1))
+        restartSources(env, chckptId, env.clustNodes)
+        Enum.map(env.clustNodes, &Drepel.Stats.startSampling(&1))
         Checkpoint.startCheckpointing()
-        Balancer.reset(clustNodes, newRouting)
+        Balancer.reset(env.clustNodes, env.routing)
         Logger.info "system restarted"
-        { :reply, :ok, env}
     end
 
     def computeAncestors(env, ids) do
@@ -359,68 +375,13 @@ defmodule Drepel.Env do
     end
 
     def handle_cast({:balance, from, to, ids}, env) do
-        leader = Enum.at(env.clustNodes, 0) 
+        # stop all sources/signals
+        stopAll(env)
+
         newRouting = Enum.reduce(ids, env.routing, &Map.put(&2, &1, to))
-        ancestors = computeAncestors(env, ids) |> MapSet.to_list()
-
-        # stop stats
-        [from, to] 
-        |> Enum.map(&Drepel.Stats.stopSampling(&1))
-
-        # reset stats
-        Map.to_list(newRouting) 
-        |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
-        |> Map.take([from, to])
-        |> Enum.map(fn {clustNode, graphNodes} -> 
-            Drepel.Stats.reset(clustNode, graphNodes) 
-        end)
-
-        sourcesAncestors = ancestors -- (Map.keys(env.nodes) -- env.sources)
-        signalsAncestors = ancestors -- env.sources
-        # stop sources ancestors
-        stopAll(Source.Supervisor, sourcesAncestors, env.routing)
-        # stop signals ancestors
-        stopAll(Signal.Supervisor, signalsAncestors, env.routing)
-        
         chckptId = Checkpoint.lastCompleted()
-        # restart all signals
-        Enum.map(signalsAncestors, fn id ->
-            node = newRouting[id]
-            Signal.Supervisor.restart( 
-                node,
-                id, 
-                chckptId,
-                newRouting,
-                computeRepNodes(env.clustNodes, env.repFactor, node),
-                leader
-            )
-        end)
-        # restart all sources
-        Enum.map(sourcesAncestors, fn id ->
-            node = newRouting[id]
-            aSource = Map.get(env.nodes, id)
-            sourceSupervisorCls = Module.concat(aSource.__struct__, Supervisor)
-            sourceSupervisorCls.restart(
-                %{ aSource | 
-                    routing: newRouting,
-                    repNodes: computeRepNodes(env.clustNodes, env.repFactor, node)
-                }, 
-                node, 
-                id, 
-                chckptId
-            )
-        end)
-        # start stats
-        [from, to]
-        |> Enum.map(&Drepel.Stats.startSampling(&1))
-        # start checkpointing
-        Checkpoint.startCheckpointing()
-        # reset balancer
-        Balancer.reset(env.clustNodes, newRouting)
-        # replicate env
-        env = %{ env | routing: newRouting }
-        Enum.filter(env.clustNodes, &(&1!=node()))
-        |> Enum.map(&Drepel.Env.replicate(&1, env))
+        env = %{ env | routing: newRouting}
+        _restore(env, chckptId)
         { :noreply, env }
     end
 
