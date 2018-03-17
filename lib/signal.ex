@@ -109,7 +109,9 @@ defmodule Signal do
     end
 
     def handle_cast({:propagateChckpt, message}, aSignal) do
+        # track checkpoint
         aSignal = update_in(aSignal.chckpts[message.sender], &(&1 + 1))
+        # ready if checkpoint message from all parents are received
         ready = Enum.reduce_while(aSignal.chckpts, true, fn {_, cnt}, acc ->
             ready = cnt>0
             { ready && :cont || :halt, acc && ready }
@@ -120,7 +122,10 @@ defmodule Signal do
                 Checkpoint.completed(aSignal.leader, aSignal.id, message.id)
             end
             chckpts = Enum.reduce(aSignal.chckpts, %{}, fn {k, v}, acc -> Map.put(acc, k, v-1) end)
-            Enum.map(aSignal.children, &__MODULE__.propagateChckpt(Map.get(aSignal.routing, &1), &1, %{ message | sender: aSignal.id}))
+            Enum.map(aSignal.children, fn id ->
+                node = Map.get(aSignal.routing, id)
+                __MODULE__.propagateChckpt(node, id, %{ message | sender: aSignal.id})
+            end)
             aSignal = unblock(%{ aSignal | chckpts: chckpts }, message.id)
             { :noreply, aSignal }
         else

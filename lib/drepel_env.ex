@@ -170,7 +170,7 @@ defmodule Drepel.Env do
         try do
             GenServer.call({__MODULE__, node}, {:discover, node()})
         catch
-            _ -> :error
+            :exit, _msg -> :error
         end
     end
 
@@ -195,7 +195,8 @@ defmodule Drepel.Env do
         Balancer.join(leader, clustNode)
         Node.Supervisor.monitor(env.clustNodes ++ [clustNode])
         Enum.map(env.clustNodes -- [node()], &__MODULE__.addClustNode(&1, clustNode))
-        { :reply, env, %{ env | clustNodes: env.clustNodes ++ [clustNode] } }
+        newEnv = %{ env | clustNodes: env.clustNodes ++ [clustNode] }
+        { :reply, newEnv, newEnv }
     end
 
     def handle_call({:join, nodes}, _from, env) do
@@ -204,11 +205,16 @@ defmodule Drepel.Env do
         res = Enum.reduce_while(nodes, nil, fn node, _ ->
             newEnv = Drepel.Env.discover(node)
             case newEnv do
-                %__MODULE__{} -> { :halt, env}
+                %__MODULE__{} -> 
+                    Node.Supervisor.monitor(newEnv.clustNodes)
+                    { :halt, newEnv }
                 :error -> { :cont, :error }
             end
         end)
-        { :reply, :ok, res }
+        case res do
+            :error -> { :reply, :error, env }
+            _ -> { :reply, :ok, res}
+        end
     end
 
     def handle_call(:reset, _from, _) do

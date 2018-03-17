@@ -76,7 +76,7 @@ defmodule Balancer do
         end)
     end
 
-    def choose(utilById, maxMeanUtil, minMeanUtil, res) do
+    def decideBalancing(utilById, maxMeanUtil, minMeanUtil, res) do
         obj = :math.pow(maxMeanUtil-minMeanUtil, 2)
         all = Enum.reduce(utilById, %{}, fn {id, util}, acc ->
             Map.put(acc, id, :math.pow((maxMeanUtil-util)-(minMeanUtil+util), 2))
@@ -85,7 +85,7 @@ defmodule Balancer do
         if newObj<obj do
             remaining = Map.delete(utilById, id)
             util = utilById[id]
-            choose(remaining, maxMeanUtil-util, minMeanUtil+util, res++[id])
+            decideBalancing(remaining, maxMeanUtil-util, minMeanUtil+util, res++[id])
         else
             res
         end
@@ -101,7 +101,7 @@ defmodule Balancer do
         utilById = Enum.reduce(maxNodeRunningTime, %{}, fn {id, runningTime}, acc -> 
             Map.put(acc, id, runningTime*maxMeanUtil/totalRunnningTime)
         end)
-        ids = choose(utilById, maxMeanUtil, minMeanUtil, [])
+        ids = decideBalancing(utilById, maxMeanUtil, minMeanUtil, [])
         Logger.info("Balance decision: move #{inspect ids} from #{maxNode} to #{minNode}")
         if length(ids)>0 do
             Checkpoint.stopCheckpointing()
