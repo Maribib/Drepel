@@ -3,7 +3,7 @@ require Source
 defmodule EventSource do
   @enforce_keys [ :id, :port, :default ]
   defstruct [ :id, :port, :default, :dependencies, :socket, 
-  :listen_socket, :chckptInterval, :chckptTimer,
+  :listen_socket, :chckptInterval,
   children: [], startReceived: 0, ip: {127,0,0,1}, repNodes: [], 
   chckptId: 0, routing: %{}]
   
@@ -18,19 +18,13 @@ defmodule EventSource do
   def init(%__MODULE__{id: id}=aSource) do
     #IO.puts "init event-source #{inspect aSource.id}"
     Process.flag(:trap_exit, true)
-    chckptTimer = if aSource.chckptInterval>0 do
-      Process.send_after(id, :checkpoint, aSource.chckptInterval)
-    else
-      nil
-    end
     Enum.map(aSource.children, &Signal.propagateDefault(Map.get(aSource.routing, &1), &1, id, aSource.default))
-    {:ok, %{ aSource | chckptTimer: chckptTimer } }
+    {:ok, aSource }
   end
 
   def terminate(_reason, aSource) do
       :gen_tcp.close(aSource.socket)
       :gen_tcp.close(aSource.listen_socket)
-      Utils.cancelTimer(aSource.chckptTimer)
   end
 
   # Server API
@@ -48,14 +42,12 @@ defmodule EventSource do
   end
 
   def handle_info(:checkpoint, aSource) do
-      chckptTimer = Process.send_after(aSource.id, :checkpoint, aSource.chckptInterval)
       message = %ChckptMessage{ 
           id: aSource.chckptId,
           sender: aSource.id 
       }
-      Enum.map(aSource.children, &Signal.propagateChckpt(Map.get(aSource.routing, &1), &1, message))
+      Enum.map(aSource.children, &Signal.propagate(Map.get(aSource.routing, &1), &1, message))
       { :noreply, %{ aSource | 
-          chckptTimer: chckptTimer, 
           chckptId: aSource.chckptId+1
       } }
   end

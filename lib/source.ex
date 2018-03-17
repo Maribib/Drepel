@@ -9,6 +9,13 @@ defmodule Source do
 
 	use GenServer, restart: :transient
 
+    def propagate(aSource, msg) do
+        Enum.map(aSource.children, fn id ->
+            node = Map.get(aSource.routing, id)
+            Signal.propagate(node, id, msg)
+        end)
+    end
+
 	# Client API
 
 	def start_link(_opts, aSource) do
@@ -27,20 +34,21 @@ defmodule Source do
 			d when is_function(d) -> d.()
 			_ -> aSource.default
 		end
-		Enum.map(aSource.children, &Signal.propagateDefault(Map.get(aSource.routing, &1), &1, aSource.id, defaultValue))
+		Enum.map(aSource.children, fn id ->
+            node = Map.get(aSource.routing, id)
+            Signal.propagateDefault(node, id, aSource.id, defaultValue)
+        end)
         { :ok, aSource }
     end
 
     def init({%__MODULE__{}=aSource, messages}) do
         Process.flag(:trap_exit, true)
-        chckptId = Enum.reduce(messages, aSource.chckptId, fn message, acc ->
-            {propFct, chckptId} = case message do
-                %ChckptMessage{id: id} -> 
-                    IO.puts "replayed #{id}"
-                    {&Signal.propagateChckpt/3, id+1}
-                %Message{} -> {&Signal.propagate/3, acc}
+        chckptId = Enum.reduce(messages, aSource.chckptId, fn msg, acc ->
+            chckptId = case msg do
+                %ChckptMessage{id: id} -> id+1
+                %Message{} -> acc
             end
-            Enum.map(aSource.children, &propFct.(Map.get(aSource.routing, &1), &1, message))
+            propagate(aSource, msg)
             chckptId
         end)
         {:ok, %{ aSource |
@@ -54,17 +62,15 @@ defmodule Source do
     end
 
     def handle_info(:produce, aSource) do
-    	#IO.puts "produce #{inspect aSource.id}"
     	prodTimer = Process.send_after(aSource.id, :produce, aSource.refreshRate)
-        message = %Message{
+        msg = %Message{
             source: aSource.id,
             sender: aSource.id,
             value: aSource.fct.(),
             chckptId: aSource.chckptId
         }
-        #Utils.poolCall(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
-        Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, message))
-    	Enum.map(aSource.children, &Signal.propagate(Map.get(aSource.routing, &1), &1, message))
+        Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, msg))
+    	propagate(aSource, msg)
     	{ :noreply, %{ aSource | prodTimer: prodTimer } }
     end
 
@@ -87,12 +93,12 @@ defmodule Source do
 
     def handle_cast({:checkpoint, chckptId}, aSource) do
         if chckptId>aSource.chckptId do
-            message = %ChckptMessage{ 
+            msg = %ChckptMessage{ 
                 id: chckptId,
                 sender: aSource.id 
             }
-            Enum.map(aSource.repNodes, &Store.put(&1, chckptId-1, message))
-            Enum.map(aSource.children, &Signal.propagateChckpt(Map.get(aSource.routing, &1), &1, message))
+            Enum.map(aSource.repNodes, &Store.put(&1, chckptId-1, msg))
+            propagate(aSource, msg)
             { :noreply, %{ aSource |
                 chckptId: chckptId
             } }

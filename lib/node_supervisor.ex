@@ -28,8 +28,6 @@ defmodule Node.Supervisor do
     end
 
 	def handle_call({:monitor, clustNodes}, _from, state) do
-		IO.puts "monitor #{inspect state.clustNodes}"
-		IO.puts "monitor #{inspect clustNodes}"
 		Enum.map(state.clustNodes -- clustNodes, &Node.monitor(&1, false))
 		Enum.map(clustNodes -- state.clustNodes, &Node.monitor(&1, true))
 		{ :reply, :ok, %{ state | clustNodes: clustNodes } }
@@ -54,14 +52,16 @@ defmodule Node.Supervisor do
 	end
 
 	def handle_info({:nodedown, nodeName}, state) do
+		# stop balancer
 		Balancer.stop()
-		Checkpoint.stopCheckpointing()
-		# Stop stats sampling
-		Drepel.Stats.stopSampling()
-		# Stop nodes (sources and signals)
+		# stop checkpointing
+		Checkpoint.stop()
+		# stop sampling
+		Sampler.stop()
+		# stop nodes (sources and signals)
 		supervisors = [Source.Supervisor, EventSource.Supervisor, Signal.Supervisor]
 		Enum.map(supervisors, &Utils.stopChildren(&1))
-		# Elect and alert new leader
+		# Elect and alert new leader with stop message
 		clustNodes = state.clustNodes -- [nodeName]
 		leader = Enum.at(clustNodes, 0)
 		stop(leader, nodeName)

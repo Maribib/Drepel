@@ -7,33 +7,7 @@ defmodule Signal do
     hasChildren: false, repNodes: [], routing: %{} ]
 
     use GenServer, restart: :transient
-
-    # Client API
-
-    def start_link(_opts, aSignal) do
-        GenServer.start_link(__MODULE__, aSignal, name: aSignal.id)
-    end
-
-    def propagate(aNode, id, message) do
-        GenServer.cast({id, aNode}, {:propagate, message})
-    end
-
-    def _propagate(%__MODULE__{}=aSignal, message, value) do
-        message = %{ message |
-            sender: aSignal.id,
-            value: value
-        }
-        Enum.map(aSignal.children, &__MODULE__.propagate(Map.get(aSignal.routing, &1), &1, message))
-    end
-
-    def propagateDefault(aNode, id, sender, value) do
-        GenServer.cast({id, aNode}, {:propagateDefault, sender, value})
-    end
-
-    def propagateChckpt(aNode, id, message) do
-        GenServer.cast({id, aNode}, {:propagateChckpt, message})
-    end
-
+    
     def unblock(aSignal, chckptId) do
         Enum.reduce(aSignal.buffs, aSignal, fn {source, _}, aSignal -> 
             _unblock(aSignal, source, chckptId)
@@ -52,6 +26,30 @@ defmodule Signal do
             aSignal
         end
     end
+
+    def _propagate(%__MODULE__{}=aSignal, msg, value) do
+        msg = %{ msg |
+            sender: aSignal.id,
+            value: value
+        }
+        Enum.map(aSignal.children, &__MODULE__.propagate(Map.get(aSignal.routing, &1), &1, msg))
+    end
+
+    # Client API
+
+    def start_link(_opts, aSignal) do
+        GenServer.start_link(__MODULE__, aSignal, name: aSignal.id)
+    end
+
+    def propagate(aNode, id, msg) do
+        GenServer.cast({id, aNode}, {:propagate, msg})
+    end
+
+    def propagateDefault(aNode, id, sender, value) do
+        GenServer.cast({id, aNode}, {:propagateDefault, sender, value})
+    end
+
+ 
 
     # Server API
 
@@ -92,9 +90,8 @@ defmodule Signal do
         end 
     end
 
-    def handle_cast({:propagate, %Message{sender: sender, source: source}=message}, aSignal) do 
-        #IO.puts "qprops #{inspect aSignal.id} #{inspect value}"
-        aSignal = update_in(aSignal.buffs[source][sender], &(:queue.in(message, &1)))
+    def handle_cast({:propagate, %Message{sender: sender, source: source}=msg}, aSignal) do 
+        aSignal = update_in(aSignal.buffs[source][sender], &(:queue.in(msg, &1)))
         ready = Enum.reduce_while(aSignal.buffs[source], true, fn {_, queue}, acc ->
             chckpting = Map.get(aSignal.chckpts, sender)>0
             empty = :queue.is_empty(queue)
@@ -108,25 +105,25 @@ defmodule Signal do
         end
     end
 
-    def handle_cast({:propagateChckpt, message}, aSignal) do
+    def handle_cast({:propagate, %ChckptMessage{id: id, sender: sender}=msg}, aSignal) do
         # track checkpoint
-        aSignal = update_in(aSignal.chckpts[message.sender], &(&1 + 1))
+        aSignal = update_in(aSignal.chckpts[sender], &(&1 + 1))
         # ready if checkpoint message from all parents are received
         ready = Enum.reduce_while(aSignal.chckpts, true, fn {_, cnt}, acc ->
             ready = cnt>0
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
-            Enum.map(aSignal.repNodes, &Store.put(&1, message.id, aSignal))
+            Enum.map(aSignal.repNodes, &Store.put(&1, id, aSignal))
             if !aSignal.hasChildren do
-                Checkpoint.completed(aSignal.leader, aSignal.id, message.id)
+                Checkpoint.completed(aSignal.leader, aSignal.id, id)
             end
             chckpts = Enum.reduce(aSignal.chckpts, %{}, fn {k, v}, acc -> Map.put(acc, k, v-1) end)
             Enum.map(aSignal.children, fn id ->
                 node = Map.get(aSignal.routing, id)
-                __MODULE__.propagateChckpt(node, id, %{ message | sender: aSignal.id})
+                propagate(node, id, %{ msg | sender: aSignal.id})
             end)
-            aSignal = unblock(%{ aSignal | chckpts: chckpts }, message.id)
+            aSignal = unblock(%{ aSignal | chckpts: chckpts }, id)
             { :noreply, aSignal }
         else
             { :noreply, aSignal }

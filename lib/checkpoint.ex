@@ -5,6 +5,15 @@ defmodule Checkpoint do
     lastCompleted: -1, chckptId: 0, clustNodes: [], buffs: %{}]
 
     use GenServer
+
+    def onComplete(state, chckptId) do
+        if !is_nil(state.waiting) && state.waiting.id==chckptId do
+            apply(&Drepel.Env.move/2, state.waiting.args)
+            %{ state | waiting: nil }
+        else
+            state
+        end
+    end
     
     # Client API
 
@@ -28,16 +37,20 @@ defmodule Checkpoint do
         GenServer.call(__MODULE__, :lastCompleted)
     end
 
-    def startCheckpointing do
-        GenServer.call(__MODULE__, :startCheckpointing)
+    def start do
+        GenServer.call(__MODULE__, :start)
     end
 
-    def startCheckpointing(node) do
-        GenServer.call({__MODULE__, node}, :startCheckpointing)
+    def start(node) do
+        GenServer.call({__MODULE__, node}, :start)
     end
 
-    def stopCheckpointing do
-        GenServer.call(__MODULE__, :stopCheckpointing)
+    def stop do
+        GenServer.call(__MODULE__, :stop)
+    end
+
+    def stop(node) do
+        GenServer.call({__MODULE__, node}, :stop)
     end
 
     def balance() do
@@ -54,14 +67,14 @@ defmodule Checkpoint do
         { :ok, %__MODULE__{} }
     end
 
-    def handle_call(:startCheckpointing, _from, state) do
+    def handle_call(:start, _from, state) do
         { :reply, :ok, %{ state | 
             chckptId: state.lastCompleted==-1 && 0 || state.lastCompleted+1,
             timer: Process.send_after(self(), :injectChckpt, state.chckptInterval)
         } }
     end
 
-    def handle_call(:stopCheckpointing, _from, state) do
+    def handle_call(:stop, _from, state) do
         Utils.cancelTimer(state.timer)
         { :reply, :ok, %{ state | timer: nil } }
     end
@@ -102,24 +115,19 @@ defmodule Checkpoint do
         end)
         if ready do
             Logger.info("checkpoint #{inspect chckptId} completed")
+            # broadcast last completed checkpoint id
             Enum.filter(state.clustNodes, &(&1!=node()))
             |> Enum.map(&Checkpoint.setLastCompleted(&1, chckptId))
+            # clean stores
             Enum.map(state.clustNodes, &Store.clean(&1, chckptId-1))
-            state = if !is_nil(state.waiting) && state.waiting.id==chckptId do
-                apply(&Drepel.Env.balance/3, state.waiting.args)
-                %{ state | waiting: nil }
-            else
-                state
-            end
-            {   
-                :noreply,
-                %{ state |
-                    buffs: Enum.reduce(state.buffs, %{}, fn {id, cnt}, acc ->
-                        Map.put(acc, id, cnt-1)
-                    end),
-                    lastCompleted: chckptId
-                }
-            }
+            # completion callback
+            state = onComplete(state, chckptId)
+            { :noreply, %{ state |
+                buffs: Enum.reduce(state.buffs, %{}, fn {id, cnt}, acc ->
+                    Map.put(acc, id, cnt-1)
+                end),
+                lastCompleted: chckptId
+            } }
         else
             {:noreply, state }
         end

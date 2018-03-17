@@ -12,4 +12,14 @@ defmodule Utils do
 			Supervisor.terminate_child(supervisor, pid)
 		end)
     end
+
+    def stopChildren(supervisor, nodes) do
+        Enum.map(nodes, fn node ->
+            Task.Supervisor.async({Task.Spawner, node}, fn ->
+                Supervisor.which_children(supervisor)
+                |> Enum.map(&Supervisor.terminate_child(supervisor, elem(&1, 1)))
+            end)
+        end)
+        |> Enum.map(&Task.await(&1))
+    end
 end

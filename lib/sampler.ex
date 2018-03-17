@@ -1,4 +1,4 @@
-defmodule Drepel.Stats do
+defmodule Sampler do
     defstruct [ :snapshot, :ids, :lastIn, :runningTime, :pidToId, 
     msgQ: %{}, stopped: true ]
 
@@ -30,16 +30,16 @@ defmodule Drepel.Stats do
     	GenServer.call({__MODULE__, node}, :getReport)
     end
 
-    def startSampling(node) do
-        GenServer.call({__MODULE__, node}, :startSampling)
+    def start(node) do
+        GenServer.call({__MODULE__, node}, :start)
     end
 
-    def stopSampling(node) do
-        GenServer.call({__MODULE__, node}, :stopSampling)
+    def stop(node) do
+        GenServer.call({__MODULE__, node}, :stop)
     end
 
-    def stopSampling do
-        GenServer.call(__MODULE__, :stopSampling)
+    def stop do
+        GenServer.call(__MODULE__, :stop)
     end
 
     # Server API
@@ -78,7 +78,7 @@ defmodule Drepel.Stats do
         }
     end
 
-    def handle_call(:startSampling, _from, state) do
+    def handle_call(:start, _from, state) do
         pidToId = Enum.reduce(state.ids, %{}, fn id, acc ->
             pid = Process.whereis(id)
             pid |> :erlang.trace(true, [:running, :timestamp]) 
@@ -91,7 +91,7 @@ defmodule Drepel.Stats do
         } }
     end
 
-    def handle_call(:stopSampling, _from, state) do
+    def handle_call(:stop, _from, state) do
         Enum.map(state.ids, fn id ->
             Process.whereis(id)
             |> :erlang.trace(false, [:running, :timestamp]) 

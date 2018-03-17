@@ -15,6 +15,27 @@ defmodule Balancer do
             Map.put(acc, node, meanUtil)
         end)
     end
+
+    def computeTotalRunningTime({_, runningTimeById}) do
+        Enum.reduce(runningTimeById, 0, fn {_, runningTime}, acc -> 
+            acc + runningTime
+        end)
+    end
+
+    def decideBalancing(utilById, maxMeanUtil, minMeanUtil, res) do
+        obj = :math.pow(maxMeanUtil-minMeanUtil, 2)
+        all = Enum.reduce(utilById, %{}, fn {id, util}, acc ->
+            Map.put(acc, id, :math.pow((maxMeanUtil-util)-(minMeanUtil+util), 2))
+        end)
+        {id, newObj} = Enum.min_by(all, &elem(&1, 1))
+        if newObj<obj do
+            remaining = Map.delete(utilById, id)
+            util = utilById[id]
+            decideBalancing(remaining, maxMeanUtil-util, minMeanUtil+util, res++[id])
+        else
+            res
+        end
+    end
     
     # Client API
 
@@ -28,6 +49,10 @@ defmodule Balancer do
 
     def reset(node, clustNodes, routing) do
         GenServer.call({__MODULE__, node}, {:reset, clustNodes, routing})
+    end
+
+    def stop(node) do
+        GenServer.call({__MODULE__, node}, :stop)
     end
 
     def stop do
@@ -61,38 +86,8 @@ defmodule Balancer do
         { :reply, :ok, %{ state | clustNodes: state.clustNodes ++ [node] } }
     end
 
-    def computeTotalUtilByNode(reports) do 
-        Enum.reduce(reports, %{}, fn {node, {utilizations, _}}, acc ->
-            meanUtil = Enum.reduce(utilizations, 0, fn {_, utilization}, acc ->
-                acc + utilization
-            end)
-            Map.put(acc, node, meanUtil)
-        end)
-    end
-
-    def computeTotalRunningTime({_, runningTimeById}) do
-        Enum.reduce(runningTimeById, 0, fn {_, runningTime}, acc -> 
-            acc + runningTime
-        end)
-    end
-
-    def decideBalancing(utilById, maxMeanUtil, minMeanUtil, res) do
-        obj = :math.pow(maxMeanUtil-minMeanUtil, 2)
-        all = Enum.reduce(utilById, %{}, fn {id, util}, acc ->
-            Map.put(acc, id, :math.pow((maxMeanUtil-util)-(minMeanUtil+util), 2))
-        end)
-        {id, newObj} = Enum.min_by(all, &elem(&1, 1))
-        if newObj<obj do
-            remaining = Map.delete(utilById, id)
-            util = utilById[id]
-            decideBalancing(remaining, maxMeanUtil-util, minMeanUtil+util, res++[id])
-        else
-            res
-        end
-    end
-
     def handle_info(:balance, state) do
-        reports = Enum.reduce(state.clustNodes, %{}, &Map.put(&2, &1, Drepel.Stats.getReport(&1)))
+        reports = Enum.reduce(state.clustNodes, %{}, &Map.put(&2, &1, Sampler.getReport(&1)))
         Logger.info(inspect reports)
         meanUtilByNode = computeMeanUtilByNode(reports)
         {{minNode, minMeanUtil}, {maxNode, maxMeanUtil}} = Enum.min_max_by(meanUtilByNode, &elem(&1, 1))
@@ -104,14 +99,14 @@ defmodule Balancer do
         ids = decideBalancing(utilById, maxMeanUtil, minMeanUtil, [])
         Logger.info("Balance decision: move #{inspect ids} from #{maxNode} to #{minNode}")
         if length(ids)>0 do
-            Checkpoint.stopCheckpointing()
+            Checkpoint.stop()
             cnt = Enum.map(ids, &GenServer.call({&1, state.routing[&1]}, {:addRepNode, minNode}))
             |> Enum.filter(&(&1==:ok))
             |> Enum.count()
             if cnt>0 do
                 Checkpoint.injectAndWaitForCompletion([maxNode, minNode, ids])
             else
-                Drepel.Env.balance(maxNode, minNode, ids)
+                Drepel.Env.move(minNode, ids)
             end
             { :noreply, state }
         else
@@ -119,7 +114,6 @@ defmodule Balancer do
                 timer: Process.send_after(__MODULE__, :balance, @reportInterval),
             } }
         end
-        
     end
     
 end

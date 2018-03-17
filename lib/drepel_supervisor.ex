@@ -7,8 +7,8 @@ defmodule Drepel.Supervisor do
 
     def init(:ok) do
         children = [
-            Supervisor.Spec.worker(Drepel.Env, [[name: Drepel.Env]]),
-            Supervisor.Spec.worker(Drepel.Stats, [[name: Drepel.Stats]]),
+            {Drepel.Env, name: Drepel.Env},
+            {Sampler, name: Sampler},
             {Signal.Supervisor, name: Signal.Supervisor}, 
             {Source.Supervisor, name: Source.Supervisor},
             {EventSource.Supervisor, name: EventSource.Supervisor},
