@@ -134,24 +134,27 @@ defmodule Signal do
         #IO.puts "propagateDefault #{inspect aSignal.id} #{inspect sender}"
         aSignal = %{ aSignal | args: %{ aSignal.args | sender => parentDefault } }
         aSignal = if Enum.count(aSignal.args, fn {_, arg} -> arg==%Sentinel{} end)==0 do
-            aSignal = if length(aSignal.children)>0 do
-                args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
-                { default, state } = case aSignal.state do
-                    %Sentinel{} -> 
-                        { apply(aSignal.fct, args), aSignal.state }
-                    _ -> 
-                        apply(aSignal.fct, args ++ [aSignal.state])
-                end
-                Enum.map(aSignal.children, &__MODULE__.propagateDefault(Map.get(aSignal.routing, &1), &1, aSignal.id, default))
-                %{ aSignal | state: state }
+            args = Enum.map(aSignal.parents, &Map.get(aSignal.args, &1))
+            { default, state } = case aSignal.state do
+                %Sentinel{} -> 
+                    { apply(aSignal.fct, args), aSignal.state }
+                _ -> 
+                    apply(aSignal.fct, args ++ [aSignal.state])
+            end
+            if length(aSignal.children)>0 do 
+                Enum.map(aSignal.children, fn id ->
+                    node = Map.get(aSignal.routing, id)
+                    propagateDefault(node, id, aSignal.id, default)
+                end)
             else
-                apply(aSignal.fct, Enum.map(aSignal.parents, &Map.get(aSignal.args, &1)))
-                Enum.map(aSignal.parents, &send({&1, Map.get(aSignal.routing, &1)}, :start))
-                aSignal
+                Enum.map(aSignal.parents, fn id ->
+                    node = Map.get(aSignal.routing, id)
+                    send({id, node}, :start)
+                end)
             end
             # copy initial state in case of failure before first checkpoint completion
             Enum.map(aSignal.repNodes, &Store.put(&1, -1, aSignal))
-            aSignal
+            %{ aSignal | state: state }
         else
             aSignal
         end
