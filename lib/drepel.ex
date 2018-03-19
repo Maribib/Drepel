@@ -12,15 +12,6 @@ defmodule Drepel do
         Drepel.Env.stopNodes()
     end
 
-    def test() do
-        s1 = Drepel.milliseconds(3) 
-        s2 = Drepel.milliseconds(2, node: :"bar@MB")
-        s3 = Drepel.milliseconds(2, node: :"bar@MB")
-        x1 = Drepel.signal([s1, s2], fn x,y -> x+y end, node: :"bar@MB")
-        x2 = Drepel.signal([s2, s3], fn y,z -> y*y+z*z end, node: :"bar@MB")
-        Drepel.run()
-    end
-
     def resetEnv do
         Drepel.Env.reset()
     end
@@ -56,7 +47,8 @@ defmodule Drepel do
     def signal(parents, fct, opts) when is_list(parents) and is_function(fct) do
         if length(parents)>0 do
             if :erlang.fun_info(fct)[:arity]==length(parents) do
-                Drepel.Env.createSignal(Enum.map(parents, fn %MockNode{id: id} -> id end), fct, opts)
+                Enum.map(parents, fn %MockNode{id: id} -> id end)
+                |> Drepel.Env.createSignal(fct, opts)
             else
                 throw "The arity of the function must be equal to the number of parents."
             end
@@ -71,6 +63,20 @@ defmodule Drepel do
 
     def map(%MockNode{}=parent, fct, opts \\ []) when is_function(fct) do
         signal([parent], fct, opts)
+    end
+
+    def stateSignal(parents, initState, fcg, opts \\ [])
+    def stateSignal(parents, initState, fct, opts) when is_function(fct) and is_list(parents) do 
+        if :erlang.fun_info(fct)[:arity]==length(parents)+1 do
+            Enum.map(parents, fn %MockNode{id: id} -> id end)
+            |> Drepel.Env.createStatedNode(fct, initState, opts)
+        else 
+            throw "The arity of the function must be equal to #parents + 1."
+        end
+    end
+
+    def stateSignal(%MockNode{}=parent, initState, fct, opts) when is_function(fct) do 
+        stateSignal([parent], initState, fct, opts)
     end
 
     def scan(%MockNode{id: id}, initState, fct, opts \\ []) when is_function(fct) do
