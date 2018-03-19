@@ -4,7 +4,7 @@ require Logger
 
 defmodule Drepel.Env do
     defstruct [ id: 1, sources: [], nodes: %{}, clustNodes: [], 
-    repFactor: 1, chckptInterval: 1000, routing: %{} ]
+    repFactor: 1, chckptInterval: 1000, routing: %{}, eventSources: [] ]
 
     use GenServer
 
@@ -22,7 +22,7 @@ defmodule Drepel.Env do
     end
 
     def stopAll(env) do
-        supervisors = [Source.Supervisor, EventSource.Supervisor, Signal.Supervisor]
+        supervisors = [Source.Supervisor, TCPServer.Supervisor, EventSource.Supervisor, Signal.Supervisor]
         Enum.map(supervisors, &Utils.stopChildren(&1, env.clustNodes))
     end
 
@@ -110,10 +110,11 @@ defmodule Drepel.Env do
         |> Enum.uniq()
     end
 
-    def resetStats(routing) do
+    def resetStats(routing, eventSources) do
         clustNodesToGraphNode = Map.to_list(routing) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
-        Enum.map(clustNodesToGraphNode, fn {clustNode, graphNodes} -> 
-            Sampler.reset(clustNode, graphNodes) 
+        Enum.map(clustNodesToGraphNode, fn {clustNode, graphNodes} ->
+            localEventSources = graphNodes -- (graphNodes -- eventSources)
+            Sampler.reset(clustNode, graphNodes, localEventSources) 
         end)
     end
     
@@ -123,7 +124,7 @@ defmodule Drepel.Env do
         Enum.filter(env.clustNodes, &(&1!=node()))
         |> Enum.map(&Drepel.Env.replicate(&1, env))
         # reset stats
-        resetStats(env.routing)
+        resetStats(env.routing, env.eventSources)
         # reset checkpointing
         sourcesRouting = Map.take(env.routing, env.sources)
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
@@ -236,7 +237,7 @@ defmodule Drepel.Env do
     end
 
     def handle_call({:join, nodes}, _from, env) do
-        Sampler.reset(node(), [])
+        Sampler.reset(node(), [], [])
         Sampler.start(node())
         res = Enum.reduce_while(nodes, nil, fn node, _ ->
             newEnv = Drepel.Env.discover(node)
@@ -295,7 +296,8 @@ defmodule Drepel.Env do
             id: env.id+1, 
             sources: env.sources ++ [id],
             nodes: Map.put(env.nodes, id, newSource),
-            routing: Map.put(env.routing, id, node)
+            routing: Map.put(env.routing, id, node),
+            eventSources: env.eventSources ++ [id]
         }
         {:reply, %MockNode{id: id}, env}
     end
@@ -332,7 +334,7 @@ defmodule Drepel.Env do
         Enum.filter(env.clustNodes, &(&1!=node()))
         |> Enum.map(&Drepel.Env.replicate(&1, env))
         # reset stats
-        resetStats(env.routing)
+        resetStats(env.routing, env.eventSources)
         # reset stores
         Enum.map(env.clustNodes, &Store.reset(&1))
         # reset checkpointing

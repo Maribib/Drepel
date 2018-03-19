@@ -9,6 +9,7 @@ defmodule Drepel.Supervisor do
         children = [
             {Drepel.Env, name: Drepel.Env},
             {Sampler, name: Sampler},
+            {TCPServer.Supervisor, name: TCPServer.Supervisor}, 
             {Signal.Supervisor, name: Signal.Supervisor}, 
             {Source.Supervisor, name: Source.Supervisor},
             {EventSource.Supervisor, name: EventSource.Supervisor},

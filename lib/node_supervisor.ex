@@ -59,7 +59,7 @@ defmodule Node.Supervisor do
 		# stop sampling
 		Sampler.stop()
 		# stop nodes (sources and signals)
-		supervisors = [Source.Supervisor, EventSource.Supervisor, Signal.Supervisor]
+		supervisors = [Source.Supervisor, TCPServer.Supervisor, EventSource.Supervisor, Signal.Supervisor]
 		Enum.map(supervisors, &Utils.stopChildren(&1))
 		# Elect and alert new leader with stop message
 		clustNodes = state.clustNodes -- [nodeName]

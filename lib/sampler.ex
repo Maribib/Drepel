@@ -1,5 +1,6 @@
 defmodule Sampler do
-    defstruct [ :snapshot, :ids, :lastIn, :runningTime, :pidToId, 
+    defstruct [ :snapshot, :ids, :lastIn, :runningTime, :pidToId,
+    :eventSources, :esPidToId,
     msgQ: %{}, stopped: true ]
 
     use GenServer
@@ -22,8 +23,8 @@ defmodule Sampler do
         GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def reset(node, ids) do
-    	GenServer.call({__MODULE__, node}, {:reset, ids})
+    def reset(node, ids, eventSources) do
+    	GenServer.call({__MODULE__, node}, {:reset, ids, eventSources})
     end
 
     def getReport(node) do
@@ -49,13 +50,13 @@ defmodule Sampler do
         { :ok, %__MODULE__{} }
     end
 
-    def handle_call({:reset, ids}, _from, _oldStats) do
-        IO.puts inspect ids
+    def handle_call({:reset, ids, eventSources}, _from, _oldStats) do
     	{ 
             :reply, 
             :ok, 
             %__MODULE__{
                 ids: ids,
+                eventSources: eventSources,
                 runningTime: %{},
                 lastIn: %{},
                 #msgQ: Enum.reduce(signals, %{}, &Map.put(&2, &1, []))
@@ -71,10 +72,19 @@ defmodule Sampler do
             { 
                 utilization, 
                 Enum.reduce(state.runningTime, %{}, fn {pid, value}, acc -> 
-                    Map.put(acc, state.pidToId[pid], value)
+                    key = if Map.has_key?(state.pidToId, pid) do
+                        state.pidToId[pid]    
+                    else
+                        state.esPidToId[pid]
+                    end
+                    curr = Map.get(acc, key, 0)
+                    Map.put(acc, key, curr+value)
                 end)
             },
-            %{ state | snapshot: snapshot }
+            %{ state | 
+                snapshot: snapshot,
+                runningTime: Enum.reduce(Map.keys(state.runningTime), %{}, &Map.put(&2, &1, 0))
+            }
         }
     end
 
@@ -84,10 +94,17 @@ defmodule Sampler do
             pid |> :erlang.trace(true, [:running, :timestamp]) 
             Map.put(acc, pid, id)
         end)
-        { :reply, :ok, %{ state | 
-            snapshot: sampleSchedulers(), 
+        esPidToId = Enum.reduce(state.eventSources, %{}, fn id, acc ->
+            name = String.to_atom("tcp_#{Atom.to_string(id)}")
+            pid = Process.whereis(name)
+            pid |> :erlang.trace(true, [:running, :timestamp]) 
+            Map.put(acc, pid, id)
+        end)
+        { :reply, :ok, %{ state |
+            snapshot: sampleSchedulers(),
             stopped: false,
-            pidToId: pidToId
+            pidToId: pidToId,
+            esPidToId: esPidToId
         } }
     end
 
@@ -95,6 +112,11 @@ defmodule Sampler do
         Enum.map(state.ids, fn id ->
             Process.whereis(id)
             |> :erlang.trace(false, [:running, :timestamp]) 
+        end)
+        Enum.map(state.eventSources, fn id ->
+            name = String.to_atom("tcp_#{Atom.to_string(id)}")
+            Process.whereis(name)
+            |> :erlang.trace(true, [:running, :timestamp]) 
         end)
         { :reply, :ok, %{ state | stopped: true } }
     end
@@ -108,12 +130,16 @@ defmodule Sampler do
     end
 
     def handle_info({:trace_ts, pid, :out, _, {_, outSec, outUSec}}, %__MODULE__{stopped: false}=state) do
-        {_, inSec, inUSec} = state.lastIn[pid]
-        {
-            :noreply,
-            update_in(state.runningTime[pid], fn cur -> 
-                (is_nil(cur) && 0 || cur) + 1000000*(outSec - inSec) + (outUSec-inUSec)
-            end) 
-        }
+        try do
+            {_, inSec, inUSec} = state.lastIn[pid]
+            {
+                :noreply,
+                update_in(state.runningTime[pid], fn cur -> 
+                    (is_nil(cur) && 0 || cur) + 1000000*(outSec - inSec) + (outUSec-inUSec)
+                end) 
+            }
+        rescue
+            MatchError -> {:noreply, state}
+        end
     end
 end
