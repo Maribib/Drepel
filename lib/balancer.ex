@@ -25,7 +25,8 @@ defmodule Balancer do
     def decideBalancing(utilById, maxMeanUtil, minMeanUtil, res) do
         obj = :math.pow(maxMeanUtil-minMeanUtil, 2)
         all = Enum.reduce(utilById, %{}, fn {id, util}, acc ->
-            Map.put(acc, id, :math.pow((maxMeanUtil-util)-(minMeanUtil+util), 2))
+            # :math.pow((maxMeanUtil-util)-(minMeanUtil+util), 2)
+            Map.put(acc, id, :math.pow((maxMeanUtil-minMeanUtil-2*util), 2))
         end)
         {id, newObj} = Enum.min_by(all, &elem(&1, 1))
         if newObj<obj do
