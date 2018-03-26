@@ -1,11 +1,9 @@
 require Logger
 
 defmodule Balancer do
-    defstruct [:clustNodes, :timer, :routing]
+    defstruct [:clustNodes, :timer, :routing, :balancingInterval]
 
     use GenServer
-
-    @reportInterval 10000
 
     def computeMeanUtilByNode(reports) do
         Enum.reduce(reports, %{}, fn {node, {utilizations, _}}, acc ->
@@ -44,12 +42,12 @@ defmodule Balancer do
        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def reset(clustNodes, routing) do
-        GenServer.call(__MODULE__, {:reset, clustNodes, routing})
+    def reset(clustNodes, routing, balancingInterval) do
+        GenServer.call(__MODULE__, {:reset, clustNodes, routing, balancingInterval})
     end
 
-    def reset(node, clustNodes, routing) do
-        GenServer.call({__MODULE__, node}, {:reset, clustNodes, routing})
+    def reset(node, clustNodes, routing, balancingInterval) do
+        GenServer.call({__MODULE__, node}, {:reset, clustNodes, routing, balancingInterval})
     end
 
     def stop(node) do
@@ -70,11 +68,16 @@ defmodule Balancer do
         { :ok, %__MODULE__{} }
     end
 
-    def handle_call({:reset, clustNodes, routing}, _from, state) do
+    def handle_call({:reset, clustNodes, routing, balancingInterval}, _from, state) do
         { :reply, :ok, %{ state | 
             clustNodes: clustNodes,
-            timer: Process.send_after(__MODULE__, :balance, @reportInterval),
-            routing: routing
+            timer: if balancingInterval>0 do
+                Process.send_after(__MODULE__, :balance, balancingInterval)
+            else
+                nil
+            end,
+            routing: routing,
+            balancingInterval: balancingInterval
         } }
     end
 
@@ -112,7 +115,7 @@ defmodule Balancer do
             { :noreply, state }
         else
             { :noreply, %{ state |
-                timer: Process.send_after(__MODULE__, :balance, @reportInterval),
+                timer: Process.send_after(__MODULE__, :balance, state.balancingInterval),
             } }
         end
     end

@@ -4,7 +4,7 @@ require Logger
 
 defmodule Drepel.Env do
     defstruct [ id: 1, sources: [], nodes: %{}, clustNodes: [], 
-    repFactor: 1, chckptInterval: 1000, routing: %{}, eventSources: [] ]
+    repFactor: 1, balancingInterval: 10000, chckptInterval: 1000, routing: %{}, eventSources: [] ]
 
     use GenServer
 
@@ -137,7 +137,7 @@ defmodule Drepel.Env do
         # restart checkpointing
         Checkpoint.start()
         # reset balancer
-        Balancer.reset(env.clustNodes, env.routing)
+        Balancer.reset(env.clustNodes, env.routing, env.balancingInterval)
         Logger.info "system restarted"
     end
 
@@ -153,6 +153,10 @@ defmodule Drepel.Env do
 
     def setCheckpointInterval(interval) do
         GenServer.call(__MODULE__, {:setCheckpointInterval, interval})
+    end
+
+    def setBalancingInterval(interval) do
+        GenServer.call(__MODULE__, {:setBalancingInterval, interval})
     end
 
     def createSource(refreshRate, fct, default, opts) do
@@ -262,6 +266,10 @@ defmodule Drepel.Env do
         { :reply, :ok, %{ env | chckptInterval: interval }  }
     end
 
+    def handle_call({:setBalancingInterval, interval}, _from, env) do
+        { :reply, :ok, %{ env | balancingInterval: interval} }
+    end
+
     def handle_call({:replicate, env}, _from, _env) do
         { :reply, :ok, env }
     end
@@ -351,7 +359,7 @@ defmodule Drepel.Env do
         # start checkpointing
         Checkpoint.start(leader)
         # reset balancer
-        Balancer.reset(leader, env.clustNodes, env.routing)
+        Balancer.reset(leader, env.clustNodes, env.routing, env.balancingInterval)
         Logger.info "system started"
         {:reply, :ok, env }
     end
