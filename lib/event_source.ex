@@ -1,7 +1,7 @@
 defmodule EventSource do
     @enforce_keys [ :id, :port, :default ]
     defstruct [ :id, :default, :dependencies, :port, :server,
-    children: [], startReceived: 0, repNodes: [], ip: {127,0,0,1},
+    children: [], startReceived: 0, repNodes: [],
     chckptId: 0, routing: %{}]
     
     use GenServer, restart: :transient
@@ -25,7 +25,7 @@ defmodule EventSource do
 
     def init(%__MODULE__{id: sid}=aSource) do
         name = String.to_atom("tcp_#{Atom.to_string(aSource.id)}")
-        IO.puts inspect TCPServer.Supervisor.start({name, aSource.id, aSource.ip, aSource.port})
+        IO.puts inspect TCPServer.Supervisor.start({name, aSource.id, aSource.port})
         Enum.map(aSource.children, fn id ->
             node = Map.get(aSource.routing, id)
             Signal.propagateDefault(node, id, sid, aSource.default)
@@ -43,7 +43,7 @@ defmodule EventSource do
             chckptId
         end)
         name = String.to_atom("tcp_#{Atom.to_string(aSource.id)}")
-        TCPServer.Supervisor.start({name, aSource.id, aSource.ip, aSource.port})
+        TCPServer.Supervisor.start({name, aSource.id, aSource.port})
         TCPServer.accept(aSource.server)
         {:ok, %{ aSource |
             chckptId: chckptId,

@@ -2,19 +2,20 @@ require Logger
 
 defmodule TCPServer do
     @enforce_keys [ :id, :port, ]
-    defstruct [ :id, :port, :socket, :listenSocket, ip: {127,0,0,1} ]
+    defstruct [ :id, :port, :socket, :listenSocket]
+
+    @ip Application.get_env(:drepel, :tcp_ip)
     
     use GenServer, restart: :transient
 
     # Client API
 
-    def start_link(_opts, {name, id, ip, port}) do 
+    def start_link(_opts, {name, id, port}) do 
         GenServer.start_link(
             __MODULE__, 
             %__MODULE__{
                 id: id,
-                port: port,
-                ip: ip
+                port: port
             },
             name: name
         )
@@ -25,9 +26,12 @@ defmodule TCPServer do
         { :ok, state }
     end
 
+    def close(nil), do: nil
+    def close(socket), do: :gen_tcp.close(socket)
+
     def terminate(_reason, state) do
-        :gen_tcp.close(state.socket)
-        :gen_tcp.close(state.listenSocket)
+        close(state.socket)
+        close(state.listenSocket)
     end
 
     def accept(id) do
@@ -43,7 +47,7 @@ defmodule TCPServer do
                 :binary, 
                 {:packet, 0}, 
                 {:active,true}, 
-                {:ip, state.ip},
+                {:ip, @ip},
                 {:reuseaddr, true}
             ]
         )
