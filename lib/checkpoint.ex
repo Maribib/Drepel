@@ -70,7 +70,11 @@ defmodule Checkpoint do
     def handle_call(:start, _from, state) do
         { :reply, :ok, %{ state | 
             chckptId: state.lastCompleted==-1 && 0 || state.lastCompleted+1,
-            timer: Process.send_after(self(), :injectChckpt, state.chckptInterval)
+            timer: if state.chckptInterval>0 do
+                Process.send_after(self(), :injectChckpt, state.chckptInterval)
+            else
+                nil
+            end
         } }
     end
 
