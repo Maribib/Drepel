@@ -16,6 +16,15 @@ defmodule Drepel do
         Drepel.Env.reset()
     end
 
+    def test() do
+        s1 = Drepel.milliseconds(3) 
+        s2 = Drepel.milliseconds(2, node: :"bar@MB")
+        s3 = Drepel.milliseconds(2, node: :"bar@MB")
+        x1 = Drepel.signal([s1, s2], fn x,y -> x+y end, node: :"bar@MB")
+        x2 = Drepel.signal([s2, s3], fn y,z -> y*y+z*z end, node: :"bar@MB")
+        Drepel.run()
+    end
+
     def setCheckpointInterval(interval) when is_integer(interval) do
         if interval>=0 do
             Drepel.Env.setCheckpointInterval(interval)
@@ -23,6 +32,10 @@ defmodule Drepel do
             throw "The interval value must be positive to enable checkpointing.
             Use 0 value to disable checkpointing."
         end
+    end
+
+    def setBalancingInterval(interval) when is_integer(interval) do
+        Drepel.Env.setBalancingInterval(interval)
     end
 
     def source(rate, default, fct, opts \\ []) when is_integer(rate) do
