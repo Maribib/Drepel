@@ -36,7 +36,7 @@ defmodule Drepel.Env do
         oldClustNodes = Map.values(env.routing) |> Enum.uniq()
         Enum.reduce(env.routing, %{}, fn {id, node}, acc ->
             if Enum.member?(nodesDown, node) do
-                repNodes = computeRepNodes(oldClustNodes, env.repFactor, node)
+                repNodes = computeRepNodes(env, oldClustNodes, node)
                 newNode = Enum.at(repNodes -- nodesDown, 0)
                 Map.put(acc, id, newNode)
             else
@@ -50,7 +50,7 @@ defmodule Drepel.Env do
         |> Enum.map(fn id ->
             signal = Map.get(env.nodes, id)
             node = Map.get(env.routing, id)
-            repNodes = computeRepNodes(env.clustNodes, env.repFactor, node)
+            repNodes = computeRepNodes(env, env.clustNodes, node)
             Signal.Supervisor.start(%{ signal | 
                 routing: env.routing, 
                 repNodes: repNodes,
@@ -66,7 +66,7 @@ defmodule Drepel.Env do
             sourceSupervisorCls = Module.concat(source.__struct__, Supervisor)
             sourceSupervisorCls.start(%{ source | 
                 routing: env.routing, 
-                repNodes: computeRepNodes(env.clustNodes, env.repFactor, node)
+                repNodes: computeRepNodes(env, env.clustNodes, node)
             })
         end)
     end
@@ -80,7 +80,7 @@ defmodule Drepel.Env do
                 id, 
                 chckptId,
                 env.routing,
-                computeRepNodes(clustNodes, env.repFactor, node),
+                computeRepNodes(env, clustNodes, node),
                 leader 
             )
         end)
@@ -94,7 +94,7 @@ defmodule Drepel.Env do
             sourceSupervisorCls.restart(
                 %{ aSource | 
                     routing: env.routing,
-                    repNodes: computeRepNodes(clustNodes, env.repFactor, node)
+                    repNodes: computeRepNodes(env, clustNodes, node)
                 }, 
                 node, 
                 id, 
@@ -103,11 +103,15 @@ defmodule Drepel.Env do
         end)
     end
 
-    def computeRepNodes(clustNodes, repFactor, node) do
-        nbNodes = length(clustNodes)
-        pos = Enum.find_index(clustNodes, fn clustNode -> clustNode==node end)
-        Enum.map(pos..pos+repFactor, fn i -> Enum.at(clustNodes, rem(i, nbNodes)) end)
-        |> Enum.uniq()
+    def computeRepNodes(env, clustNodes, node) do
+        if (env.chckptInterval>0) do
+            nbNodes = length(clustNodes)
+            pos = Enum.find_index(clustNodes, fn clustNode -> clustNode==node end)
+            Enum.map(pos..pos+env.repFactor, fn i -> Enum.at(clustNodes, rem(i, nbNodes)) end)
+            |> Enum.uniq()
+        else
+            []
+        end
     end
 
     def resetStats(routing, eventSources) do
