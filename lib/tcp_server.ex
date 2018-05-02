@@ -45,10 +45,10 @@ defmodule TCPServer do
             state.port, 
             [
                 :binary, 
-                {:packet, 0}, 
-                {:active,true}, 
-                {:ip, @ip},
-                {:reuseaddr, true}
+                packet: 4, 
+                active: true, 
+                ip: @ip,
+                reuseaddr: true
             ]
         )
         {:ok, socket } = :gen_tcp.accept listenSocket
