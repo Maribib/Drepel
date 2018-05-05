@@ -69,7 +69,7 @@ defmodule Source do
             value: aSource.fct.(),
             chckptId: aSource.chckptId
         }
-        Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, msg))
+        Store.put(aSource.repNodes, aSource.chckptId, msg)
     	propagate(aSource, msg)
     	{ :noreply, %{ aSource | prodTimer: prodTimer } }
     end
@@ -97,7 +97,7 @@ defmodule Source do
                 id: chckptId,
                 sender: aSource.id 
             }
-            Enum.map(aSource.repNodes, &Store.put(&1, chckptId-1, msg))
+            Store.put(aSource.repNodes, chckptId-1, msg)
             propagate(aSource, msg)
             { :noreply, %{ aSource |
                 chckptId: chckptId

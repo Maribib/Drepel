@@ -21,16 +21,20 @@ defmodule Balancer do
     end
 
     def decideBalancing(utilById, maxMeanUtil, minMeanUtil, res) do
-        obj = :math.pow(maxMeanUtil-minMeanUtil, 2)
-        all = Enum.reduce(utilById, %{}, fn {id, util}, acc ->
-            # :math.pow((maxMeanUtil-util)-(minMeanUtil+util), 2)
-            Map.put(acc, id, :math.pow((maxMeanUtil-minMeanUtil-2*util), 2))
-        end)
-        {id, newObj} = Enum.min_by(all, &elem(&1, 1))
-        if newObj<obj do
-            remaining = Map.delete(utilById, id)
-            util = utilById[id]
-            decideBalancing(remaining, maxMeanUtil-util, minMeanUtil+util, res++[id])
+        if Map.size(utilById)>0 do
+            obj = :math.pow(maxMeanUtil-minMeanUtil, 2)
+            all = Enum.reduce(utilById, %{}, fn {id, util}, acc ->
+                # :math.pow((maxMeanUtil-util)-(minMeanUtil+util), 2)
+                Map.put(acc, id, :math.pow((maxMeanUtil-minMeanUtil-(2*util)), 2))
+            end)
+            {id, newObj} = Enum.min_by(all, &elem(&1, 1))
+            if newObj<obj do
+                remaining = Map.delete(utilById, id)
+                util = utilById[id]
+                decideBalancing(remaining, maxMeanUtil-util, minMeanUtil+util, res++[id])
+            else
+                res
+            end
         else
             res
         end
@@ -108,7 +112,7 @@ defmodule Balancer do
             |> Enum.filter(&(&1==:ok))
             |> Enum.count()
             if cnt>0 do
-                Checkpoint.injectAndWaitForCompletion([maxNode, minNode, ids])
+                Checkpoint.injectAndWaitForCompletion([minNode, ids])
             else
                 Drepel.Env.move(minNode, ids)
             end

@@ -14,11 +14,10 @@ defmodule Store do
     	GenServer.call({__MODULE__, nodeName}, :reset)
     end
 
-    def put(nodeName, chckptId, message) do
-    	try do
-			GenServer.call({__MODULE__, nodeName}, {:put, chckptId, message})
-		catch
-			:exit, msg -> Logger.error("connection lost: #{inspect msg}")
+    def put(nodes, chckptId, message) do
+    	{_, bad_nodes} = GenServer.multi_call(nodes, __MODULE__, {:put, chckptId, message}, 5000)
+		if length(bad_nodes)>0 do
+			Logger.error("no response: #{inspect bad_nodes}")
 		end
     end
 

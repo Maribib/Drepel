@@ -114,7 +114,7 @@ defmodule Signal do
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
-            Enum.map(aSignal.repNodes, &Store.put(&1, id, aSignal))
+            Store.put(aSignal.repNodes, id, aSignal)
             if !aSignal.hasChildren do
                 Checkpoint.completed(aSignal.leader, aSignal.id, id)
             end
@@ -153,7 +153,7 @@ defmodule Signal do
                 end)
             end
             # copy initial state in case of failure before first checkpoint completion
-            Enum.map(aSignal.repNodes, &Store.put(&1, -1, aSignal))
+            Store.put(aSignal.repNodes, -1, aSignal)
             %{ aSignal | state: state }
         else
             aSignal
