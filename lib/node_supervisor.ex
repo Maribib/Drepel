@@ -9,8 +9,8 @@ defmodule Node.Supervisor do
        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def monitor(clustNodes) do
-    	GenServer.call(__MODULE__, {:monitor, clustNodes})
+    def monitor(nodes) do
+    	Utils.multi_call(nodes, __MODULE__, {:monitor, nodes})
     end
 
     def monitor(aNode, clustNodes) do

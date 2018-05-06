@@ -1,4 +1,3 @@
-
 defmodule Signal do
     @enforce_keys [:id, :fct, :args]
     defstruct [ :id, :fct, :args, :dependencies, :buffs, :default,

@@ -1,5 +1,3 @@
-require Logger
-
 defmodule Store do
 
     use GenServer
@@ -10,15 +8,12 @@ defmodule Store do
        GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def reset(nodeName) do
-    	GenServer.call({__MODULE__, nodeName}, :reset)
+    def reset(nodes) do
+    	Utils.multi_call(nodes, __MODULE__, :reset)
     end
 
     def put(nodes, chckptId, message) do
-    	{_, bad_nodes} = GenServer.multi_call(nodes, __MODULE__, {:put, chckptId, message}, 5000)
-		if length(bad_nodes)>0 do
-			Logger.error("no response: #{inspect bad_nodes}")
-		end
+    	Utils.multi_call(nodes, __MODULE__, {:put, chckptId, message})
     end
 
     def get(id, chckptId) do

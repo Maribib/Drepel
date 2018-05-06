@@ -31,12 +31,16 @@ defmodule Sampler do
     	GenServer.call({__MODULE__, node}, :getReport)
     end
 
-    def start(node) do
-        GenServer.call({__MODULE__, node}, :start)
+    def start(nodes) do
+        Utils.multi_call(nodes, __MODULE__, :start)
     end
 
-    def stop(node) do
-        GenServer.call({__MODULE__, node}, :stop)
+    def start do
+        GenServer.call(__MODULE__, :start)
+    end
+
+    def stop(nodes) do
+        Utils.multi_call(nodes, __MODULE__, :stop)
     end
 
     def stop do

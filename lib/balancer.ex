@@ -50,10 +50,6 @@ defmodule Balancer do
         GenServer.call(__MODULE__, {:reset, clustNodes, routing, balancingInterval})
     end
 
-    def reset(node, clustNodes, routing, balancingInterval) do
-        GenServer.call({__MODULE__, node}, {:reset, clustNodes, routing, balancingInterval})
-    end
-
     def stop(node) do
         GenServer.call({__MODULE__, node}, :stop)
     end
@@ -101,22 +97,28 @@ defmodule Balancer do
         {{minNode, minMeanUtil}, {maxNode, maxMeanUtil}} = Enum.min_max_by(meanUtilByNode, &elem(&1, 1))
         totalRunnningTime = computeTotalRunningTime(reports[maxNode])
         {_, maxNodeRunningTime} = reports[maxNode]
-        utilById = Enum.reduce(maxNodeRunningTime, %{}, fn {id, runningTime}, acc -> 
-            Map.put(acc, id, runningTime*maxMeanUtil/totalRunnningTime)
-        end)
-        ids = decideBalancing(utilById, maxMeanUtil, minMeanUtil, [])
-        Logger.info("Balance decision: move #{inspect ids} from #{maxNode} to #{minNode}")
-        if length(ids)>0 do
-            Checkpoint.stop()
-            cnt = Enum.map(ids, &GenServer.call({&1, state.routing[&1]}, {:addRepNode, minNode}))
-            |> Enum.filter(&(&1==:ok))
-            |> Enum.count()
-            if cnt>0 do
-                Checkpoint.injectAndWaitForCompletion([minNode, ids])
+        if totalRunnningTime>0 do
+            utilById = Enum.reduce(maxNodeRunningTime, %{}, fn {id, runningTime}, acc -> 
+                Map.put(acc, id, runningTime*maxMeanUtil/totalRunnningTime)
+            end)
+            ids = decideBalancing(utilById, maxMeanUtil, minMeanUtil, [])
+            Logger.info("Balance decision: move #{inspect ids} from #{maxNode} to #{minNode}")
+            if length(ids)>0 do
+                Checkpoint.stop()
+                cnt = Enum.map(ids, &GenServer.call({&1, state.routing[&1]}, {:addRepNode, minNode}))
+                |> Enum.filter(&(&1==:ok))
+                |> Enum.count()
+                if cnt>0 do
+                    Checkpoint.injectAndWaitForCompletion([minNode, ids])
+                else
+                    Drepel.Env.move(minNode, ids)
+                end
+                { :noreply, state }
             else
-                Drepel.Env.move(minNode, ids)
+                { :noreply, %{ state |
+                    timer: Process.send_after(__MODULE__, :balance, state.balancingInterval),
+                } }
             end
-            { :noreply, state }
         else
             { :noreply, %{ state |
                 timer: Process.send_after(__MODULE__, :balance, state.balancingInterval),

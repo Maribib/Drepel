@@ -29,8 +29,8 @@ defmodule Checkpoint do
         GenServer.cast({__MODULE__, nodeName}, {:completed, sink, chckptId})
     end
 
-    def setLastCompleted(nodeName, chckptId) do
-        GenServer.call({__MODULE__, nodeName}, {:setLastCompleted, chckptId})
+    def setLastCompleted(nodes, chckptId) do
+        Utils.multi_call(nodes, __MODULE__, {:setLastCompleted, chckptId})
     end
 
     def lastCompleted do
@@ -119,9 +119,9 @@ defmodule Checkpoint do
         end)
         if ready do
             Logger.info("checkpoint #{inspect chckptId} completed")
-            # broadcast last completed checkpoint id
+            # multi_call last completed checkpoint id
             Enum.filter(state.clustNodes, &(&1!=node()))
-            |> Enum.map(&Checkpoint.setLastCompleted(&1, chckptId))
+            |> Checkpoint.setLastCompleted(chckptId)
             # clean stores
             Enum.map(state.clustNodes, &Store.clean(&1, chckptId-1))
             # completion callback

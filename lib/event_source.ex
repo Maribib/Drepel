@@ -64,7 +64,7 @@ defmodule EventSource do
             value: value,
             chckptId: aSource.chckptId
         }
-        Enum.map(aSource.repNodes, &Store.put(&1, aSource.chckptId, msg))
+        Store.put(aSource.repNodes, aSource.chckptId, msg)
         propagate(aSource, msg)
         { :reply, :ok, aSource }
     end
@@ -75,7 +75,7 @@ defmodule EventSource do
                 id: chckptId,
                 sender: aSource.id 
             }
-            Enum.map(aSource.repNodes, &Store.put(&1, chckptId-1, msg))
+            Store.put(aSource.repNodes, chckptId-1, msg)
             propagate(aSource, msg)
             { :noreply, %{ aSource |
                 chckptId: chckptId

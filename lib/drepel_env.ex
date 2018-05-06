@@ -126,7 +126,7 @@ defmodule Drepel.Env do
         leader = Enum.at(env.clustNodes, 0)
         # replicate env
         Enum.filter(env.clustNodes, &(&1!=node()))
-        |> Enum.map(&Drepel.Env.replicate(&1, env))
+        |> Drepel.Env.replicate(env)
         # reset stats
         resetStats(env.routing, env.eventSources)
         # reset checkpointing
@@ -137,7 +137,7 @@ defmodule Drepel.Env do
         # restart all sources
         restartSources(env, chckptId, env.clustNodes)
         # restart stats sampling
-        Enum.map(env.clustNodes, &Sampler.start(&1))
+        Sampler.start(env.clustNodes)
         # restart checkpointing
         Checkpoint.start()
         # reset balancer
@@ -195,8 +195,8 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, :stopNodes)
     end
 
-    def replicate(node, env) do
-        GenServer.call({__MODULE__, node}, {:replicate, env})
+    def replicate(nodes, env) do
+        Utils.multi_call(nodes, __MODULE__, {:replicate, env})
     end
 
     def restore(chckptId, clustNodes, nodesDown) do
@@ -219,8 +219,8 @@ defmodule Drepel.Env do
         end
     end
 
-    def addClustNode(node, clustNode) do
-        GenServer.call({__MODULE__, node}, {:addClustNode, clustNode})
+    def addClustNode(nodes, clustNode) do
+        Utils.multi_call(nodes, __MODULE__,  {:addClustNode, clustNode})
     end
 
     # Server API
@@ -239,14 +239,15 @@ defmodule Drepel.Env do
         leader = Enum.at(env.clustNodes, 0)
         Balancer.join(leader, clustNode)
         Node.Supervisor.monitor(env.clustNodes ++ [clustNode])
-        Enum.map(env.clustNodes -- [node()], &__MODULE__.addClustNode(&1, clustNode))
+        env.clustNodes -- [node()]
+        |> addClustNode(clustNode)
         newEnv = %{ env | clustNodes: env.clustNodes ++ [clustNode] }
         { :reply, newEnv, newEnv }
     end
 
     def handle_call({:join, nodes}, _from, env) do
         Sampler.reset(node(), [], [])
-        Sampler.start(node())
+        Sampler.start()
         res = Enum.reduce_while(nodes, nil, fn node, _ ->
             newEnv = Drepel.Env.discover(node)
             case newEnv do
@@ -344,26 +345,26 @@ defmodule Drepel.Env do
             raise "replication factor is too high"
         end
         Enum.filter(env.clustNodes, &(&1!=node()))
-        |> Enum.map(&Drepel.Env.replicate(&1, env))
+        |> Drepel.Env.replicate(env)
         # reset stats
         resetStats(env.routing, env.eventSources)
         # reset stores
-        Enum.map(env.clustNodes, &Store.reset(&1))
+        Store.reset(env.clustNodes)
         # reset checkpointing
         sourcesRouting = Map.take(env.routing, env.sources)
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
         # set up nodes monitoring
-        Enum.map(env.clustNodes, &Node.Supervisor.monitor(&1, env.clustNodes))
+        Node.Supervisor.monitor(env.clustNodes)
         # start signals
         startSignals(env)
         # start sources
         startSources(env)
         # start sampler
-        Enum.map(env.clustNodes, &Sampler.start(&1))
+        Sampler.start(env.clustNodes)
         # start checkpointing
         Checkpoint.start(leader)
         # reset balancer
-        Balancer.reset(leader, env.clustNodes, env.routing, env.balancingInterval)
+        Balancer.reset(env.clustNodes, env.routing, env.balancingInterval)
         Logger.info "system started"
         {:reply, :ok, env }
     end
@@ -375,7 +376,7 @@ defmodule Drepel.Env do
         # stop checkpoint
         Checkpoint.stop(leader)
         # stop stats
-        Enum.map(env.clustNodes, &Sampler.stop(&1))
+        Sampler.stop(env.clustNodes)
         # stop nodes
         stopAll(env)
         {:reply, :ok, env}

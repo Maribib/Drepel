@@ -1,3 +1,5 @@
+require Logger
+
 defmodule Utils do
 	def cancelTimer(nil) do
         nil
@@ -21,5 +23,13 @@ defmodule Utils do
             end)
         end)
         |> Enum.map(&Task.await(&1))
+    end
+
+    def multi_call(nodes, name, msg) do
+    	{_, bad_nodes} = GenServer.multi_call(nodes, name, msg)
+		if length(bad_nodes)>0 do
+			Logger.error("no response: #{inspect bad_nodes}")
+			exit(:connexion_lost)
+		end
     end
 end
