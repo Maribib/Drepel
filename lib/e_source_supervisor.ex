@@ -1,19 +1,19 @@
-defmodule Source.Supervisor do
+defmodule ESource.Supervisor do
     use Supervisor
 
     def start_link(_opts \\ nil) do
         Supervisor.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
-    def start(%Source{}=aSource) do
+    def start(%ESource{}=aSource) do
         currNode = node()
         case Map.get(aSource.routing, aSource.id) do
             ^currNode -> Supervisor.start_child(__MODULE__, [aSource])
             node -> 
-                Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    Source.Supervisor.start(aSource)
+                t = Task.Supervisor.async({Task.Spawner, node}, fn ->
+                    ESource.Supervisor.start(aSource)
                 end)
-                |> Task.await()
+                Task.await(t)
         end
     end
 
@@ -25,14 +25,14 @@ defmodule Source.Supervisor do
                 Supervisor.start_child(__MODULE__, [aSource, messages])
             _ -> 
                 Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    Source.Supervisor.restart(aSource, node, id, chckptId)
+                    ESource.Supervisor.restart(aSource, node, id, chckptId)
                 end)
                 |> Task.await()
         end
     end
 
     def init(:ok) do
-        Supervisor.init([Source], strategy: :simple_one_for_one)
+        Supervisor.init([ESource], strategy: :simple_one_for_one)
     end
 
 end

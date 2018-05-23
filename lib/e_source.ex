@@ -1,4 +1,4 @@
-defmodule EventSource do
+defmodule ESource do
     @enforce_keys [ :id, :port, :default ]
     defstruct [ :id, :default, :dependencies, :port, :server,
     children: [], startReceived: 0, repNodes: [],

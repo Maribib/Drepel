@@ -1,6 +1,6 @@
 require Signal
 
-defmodule Source do 
+defmodule BSource do 
 	@enforce_keys [ :id, :refreshRate, :fct, :default ]
 	defstruct [ :id, :refreshRate, :fct, :default, :dependencies, 
     :clustNodes, :repNodes,

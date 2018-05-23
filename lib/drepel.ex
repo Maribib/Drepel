@@ -38,22 +38,22 @@ defmodule Drepel do
         Drepel.Env.setBalancingInterval(interval)
     end
 
-    def source(rate, default, fct, opts \\ []) when is_integer(rate) do
-        Drepel.Env.createSource(rate, fct, default, opts)
+    def bSource(rate, default, fct, opts \\ []) when is_integer(rate) do
+        Drepel.Env.createBSource(rate, fct, default, opts)
     end
 
     def milliseconds(rate \\ 100, opts \\ []) when is_integer(rate) do
         fct = fn -> :os.system_time(:millisecond) end
-        __MODULE__.source(rate, fct, fct, opts)
+        __MODULE__.bSource(rate, fct, fct, opts)
     end
 
     def seconds(rate \\ 1000, opts \\ []) when is_integer(rate) do
         fct = fn -> :os.system_time(:second) end
-        __MODULE__.source(rate, fct, fct, opts)
+        __MODULE__.bSource(rate, fct, fct, opts)
     end
 
-    def eventSource(port, default, opts \\ []) when is_integer(port) do
-        Drepel.Env.createEventSource(port, default, opts)
+    def eSource(port, default, opts \\ []) when is_integer(port) do
+        Drepel.Env.createESource(port, default, opts)
     end
     
     def signal(parents, fct, opts \\ [])

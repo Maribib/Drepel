@@ -4,7 +4,7 @@ require Logger
 
 defmodule Drepel.Env do
     defstruct [ id: 1, sources: [], nodes: %{}, clustNodes: [], 
-    repFactor: 1, balancingInterval: 10000, chckptInterval: 1000, routing: %{}, eventSources: [] ]
+    repFactor: 1, balancingInterval: 10000, chckptInterval: 1000, routing: %{}, eSources: [] ]
 
     use GenServer
 
@@ -22,7 +22,7 @@ defmodule Drepel.Env do
     end
 
     def stopAll(env) do
-        supervisors = [Source.Supervisor, TCPServer.Supervisor, EventSource.Supervisor, Signal.Supervisor]
+        supervisors = [BSource.Supervisor, TCPServer.Supervisor, ESource.Supervisor, Signal.Supervisor]
         Enum.map(supervisors, &Utils.stopChildren(&1, env.clustNodes))
     end
 
@@ -114,11 +114,11 @@ defmodule Drepel.Env do
         end
     end
 
-    def resetStats(routing, eventSources) do
+    def resetStats(routing, eSources) do
         clustNodesToGraphNode = Map.to_list(routing) |> Enum.group_by(&elem(&1, 1), &elem(&1, 0))
         Enum.map(clustNodesToGraphNode, fn {clustNode, graphNodes} ->
-            localEventSources = graphNodes -- (graphNodes -- eventSources)
-            Sampler.reset(clustNode, graphNodes, localEventSources) 
+            localESources = graphNodes -- (graphNodes -- eSources)
+            Sampler.reset(clustNode, graphNodes, localESources) 
         end)
     end
     
@@ -128,7 +128,7 @@ defmodule Drepel.Env do
         Enum.filter(env.clustNodes, &(&1!=node()))
         |> Drepel.Env.replicate(env)
         # reset stats
-        resetStats(env.routing, env.eventSources)
+        resetStats(env.routing, env.eSources)
         # reset checkpointing
         sourcesRouting = Map.take(env.routing, env.sources)
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
@@ -163,14 +163,14 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, {:setBalancingInterval, interval})
     end
 
-    def createSource(refreshRate, fct, default, opts) do
+    def createBSource(refreshRate, fct, default, opts) do
         node = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createSource, refreshRate, fct, default, node})
+        GenServer.call(__MODULE__, {:createBSource, refreshRate, fct, default, node})
     end
 
-    def createEventSource(port, default, opts) do
+    def createESource(port, default, opts) do
         node = :proplists.get_value(:node, opts, node())
-        GenServer.call(__MODULE__, {:createEventSource, port, default, node})
+        GenServer.call(__MODULE__, {:createESource, port, default, node})
     end
 
     def createSignal(parents, fct, opts) do
@@ -279,9 +279,9 @@ defmodule Drepel.Env do
         { :reply, :ok, env }
     end
 
-    def handle_call({:createSource, refreshRate, fct, default, node}, _from, env) do
+    def handle_call({:createBSource, refreshRate, fct, default, node}, _from, env) do
         id = String.to_atom("node_#{env.id}")
-        newSource = %Source{
+        newSource = %BSource{
             id: id, 
             refreshRate: refreshRate, 
             fct: fct, 
@@ -297,9 +297,9 @@ defmodule Drepel.Env do
         {:reply, %MockNode{id: id}, env}
     end
 
-    def handle_call({:createEventSource, port, default, node}, _from, env) do
+    def handle_call({:createESource, port, default, node}, _from, env) do
         id = String.to_atom("node_#{env.id}")
-        newSource = %EventSource{
+        newSource = %ESource{
             id: id, 
             port: port,
             default: default,
@@ -310,7 +310,7 @@ defmodule Drepel.Env do
             sources: env.sources ++ [id],
             nodes: Map.put(env.nodes, id, newSource),
             routing: Map.put(env.routing, id, node),
-            eventSources: env.eventSources ++ [id]
+            eSources: env.eSources ++ [id]
         }
         {:reply, %MockNode{id: id}, env}
     end
@@ -347,7 +347,7 @@ defmodule Drepel.Env do
         Enum.filter(env.clustNodes, &(&1!=node()))
         |> Drepel.Env.replicate(env)
         # reset stats
-        resetStats(env.routing, env.eventSources)
+        resetStats(env.routing, env.eSources)
         # reset stores
         Store.reset(env.clustNodes)
         # reset checkpointing

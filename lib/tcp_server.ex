@@ -56,7 +56,7 @@ defmodule TCPServer do
     end
 
     def handle_info({:tcp, socket, value}, state) do
-        EventSource.onReceive(state.id, value)
+        ESource.onReceive(state.id, value)
         :gen_tcp.send(socket, "ack")
         {:noreply, state}
     end
