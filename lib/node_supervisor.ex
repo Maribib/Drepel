@@ -1,3 +1,5 @@
+require Logger
+
 defmodule Node.Supervisor do 
 	defstruct [clustNodes: [], stopMessages: [], nodesDown: [] ]
 
@@ -52,6 +54,7 @@ defmodule Node.Supervisor do
 	end
 
 	def handle_info({:nodedown, nodeName}, state) do
+		Logger.error("node down: #{nodeName}")
 		# stop balancer
 		Balancer.stop()
 		# stop checkpointing
@@ -59,7 +62,7 @@ defmodule Node.Supervisor do
 		# stop sampling
 		Sampler.stop()
 		# stop nodes (sources and signals)
-		supervisors = [Source.Supervisor, TCPServer.Supervisor, EventSource.Supervisor, Signal.Supervisor]
+		supervisors = [BSource.Supervisor, ESource.Supervisor, Signal.Supervisor]
 		Enum.map(supervisors, &Utils.stopChildren(&1))
 		# Elect and alert new leader with stop message
 		clustNodes = state.clustNodes -- [nodeName]

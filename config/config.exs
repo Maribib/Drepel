@@ -30,3 +30,4 @@ use Mix.Config
 #     import_config "#{Mix.env}.exs"
 
 config :drepel, tcp_ip: {127, 0, 0, 1}
+config :drepel, tcp_port: 9999

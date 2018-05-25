@@ -8,8 +8,7 @@ defmodule Drepel.Supervisor do
     def init(:ok) do
         children = [
             {Drepel.Env, name: Drepel.Env},
-            {Sampler, name: Sampler},
-            {TCPServer.Supervisor, name: TCPServer.Supervisor}, 
+            {Sampler, name: Sampler}, 
             {Signal.Supervisor, name: Signal.Supervisor}, 
             {BSource.Supervisor, name: BSource.Supervisor},
             {ESource.Supervisor, name: ESource.Supervisor},
@@ -17,7 +16,9 @@ defmodule Drepel.Supervisor do
             {Task.Supervisor, name: Task.Spawner},
             {Store, name: Store},
             {Checkpoint, name: Checkpoint},
-            {Balancer, name: Balancer}
+            {Balancer, name: Balancer},
+            {TCPServer, name: TCPServer},
+            {MyStuff, name: MyStuff}
         ]
         Supervisor.init(children, strategy: :one_for_one)
     end

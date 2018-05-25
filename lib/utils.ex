@@ -9,6 +9,14 @@ defmodule Utils do
         Process.cancel_timer(timer)
     end
 
+    def closeSocket(nil) do
+    	nil
+    end
+
+    def closeSocket(socket) do
+        :gen_tcp.close(socket)
+    end
+
     def stopChildren(supervisor) do
     	Enum.map(Supervisor.which_children(supervisor), fn {_, pid, _, _} ->
 			Supervisor.terminate_child(supervisor, pid)

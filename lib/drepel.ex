@@ -44,16 +44,16 @@ defmodule Drepel do
 
     def milliseconds(rate \\ 100, opts \\ []) when is_integer(rate) do
         fct = fn -> :os.system_time(:millisecond) end
-        __MODULE__.bSource(rate, fct, fct, opts)
+        Drepel.bSource(rate, fct, fct, opts)
     end
 
     def seconds(rate \\ 1000, opts \\ []) when is_integer(rate) do
         fct = fn -> :os.system_time(:second) end
-        __MODULE__.bSource(rate, fct, fct, opts)
+        Drepel.bSource(rate, fct, fct, opts)
     end
 
-    def eSource(port, default, opts \\ []) when is_integer(port) do
-        Drepel.Env.createESource(port, default, opts)
+    def eSource(name, default, opts \\ []) when is_binary(name) do
+        Drepel.Env.createESource(name, default, opts)
     end
     
     def signal(parents, fct, opts \\ [])
@@ -78,7 +78,7 @@ defmodule Drepel do
         signal([parent], fct, opts)
     end
 
-    def stateSignal(parents, initState, fcg, opts \\ [])
+    def stateSignal(parents, initState, fct, opts \\ [])
     def stateSignal(parents, initState, fct, opts) when is_function(fct) and is_list(parents) do 
         if :erlang.fun_info(fct)[:arity]==length(parents)+1 do
             Enum.map(parents, fn %MockNode{id: id} -> id end)
@@ -117,20 +117,7 @@ defmodule Drepel do
     end
 
     def run(duration \\ :inf) do
-        Drepel.Env.startNodes()
-        Process.monitor(Drepel.Supervisor)
-        res = case duration do
-            :inf -> receive do
-                _msg -> :done
-            end
-            _ -> receive do
-                _msg -> :done
-            after
-                duration -> :stopped
-            end
-        end
-        Drepel.Env.stopNodes()
-        res
+        Drepel.Env.startNodes(duration)
     end
 
     def join(nodes) when is_list(nodes) do

@@ -6,29 +6,11 @@ defmodule BSource.Supervisor do
     end
 
     def start(%BSource{}=aSource) do
-        currNode = node()
-        case Map.get(aSource.routing, aSource.id) do
-            ^currNode -> Supervisor.start_child(__MODULE__, [aSource])
-            node -> 
-                Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    BSource.Supervisor.start(aSource)
-                end)
-                |> Task.await()
-        end
+        Supervisor.start_child(__MODULE__, [aSource])
     end
 
-    def restart(aSource, node, id, chckptId) do
-        currNode = node()
-        case node do
-            ^currNode -> 
-                messages = Store.getMessages(id, chckptId)
-                Supervisor.start_child(__MODULE__, [aSource, messages])
-            _ -> 
-                Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    BSource.Supervisor.restart(aSource, node, id, chckptId)
-                end)
-                |> Task.await()
-        end
+    def restart(aSource, messages) do
+        Supervisor.start_child(__MODULE__, [aSource, messages])
     end
 
     def init(:ok) do

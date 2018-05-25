@@ -1,8 +1,10 @@
+require Logger
+
 defmodule ESource do
-    @enforce_keys [ :id, :port, :default ]
-    defstruct [ :id, :default, :dependencies, :port, :server,
+    @enforce_keys [ :id, :name, :default ]
+    defstruct [ :id, :default, :dependencies, :name, :server,
     children: [], startReceived: 0, repNodes: [],
-    chckptId: 0, routing: %{}]
+    chckptId: 0, routing: %{}, socket: nil]
     
     use GenServer, restart: :transient
 
@@ -23,9 +25,15 @@ defmodule ESource do
         GenServer.start_link(__MODULE__, {aSource, messages}, name: aSource.id)
     end
 
+    def socket(id, sock) do
+        GenServer.call(id, {:socket, sock})
+    end
+
+    # Server API
+
     def init(%__MODULE__{id: sid}=aSource) do
+        Process.flag(:trap_exit, true)
         name = String.to_atom("tcp_#{Atom.to_string(aSource.id)}")
-        IO.puts inspect TCPServer.Supervisor.start({name, aSource.id, aSource.port})
         Enum.map(aSource.children, fn id ->
             node = Map.get(aSource.routing, id)
             Signal.propagateDefault(node, id, sid, aSource.default)
@@ -33,7 +41,8 @@ defmodule ESource do
         { :ok, %{ aSource | server: name } }
     end
 
-     def init({%__MODULE__{}=aSource, messages}) do
+    def init({%__MODULE__{}=aSource, messages}) do
+        Process.flag(:trap_exit, true)
         chckptId = Enum.reduce(messages, aSource.chckptId, fn msg, acc ->
             chckptId = case msg do
                 %ChckptMessage{id: id} -> id+1
@@ -43,30 +52,15 @@ defmodule ESource do
             chckptId
         end)
         name = String.to_atom("tcp_#{Atom.to_string(aSource.id)}")
-        TCPServer.Supervisor.start({name, aSource.id, aSource.port})
-        TCPServer.accept(aSource.server)
         {:ok, %{ aSource |
             chckptId: chckptId,
             server: name
         } }
     end
 
-    def onReceive(id, value) do
-        GenServer.call(id, {:onReceive, value})
-    end
-
-    # Server API
-
-    def handle_call({:onReceive, value}, _from, aSource) do
-        msg = %Message{
-            source: aSource.id,
-            sender: aSource.id,
-            value: value,
-            chckptId: aSource.chckptId
-        }
-        Store.put(aSource.repNodes, aSource.chckptId, msg)
-        propagate(aSource, msg)
-        { :reply, :ok, aSource }
+    def handle_call({:socket, sock}, _from, aSource) do
+        Port.connect(sock, self())
+        { :reply, :ok, %{ aSource | socket: sock } }
     end
 
     def handle_cast({:checkpoint, chckptId}, aSource) do
@@ -88,11 +82,36 @@ defmodule ESource do
     def handle_info(:start, aSource) do
         aSource = %{ aSource | startReceived: aSource.startReceived+1 }
         if length(aSource.children)==aSource.startReceived do
-            TCPServer.accept(aSource.server)
             { :noreply, aSource }
         else
             { :noreply, aSource }
         end
     end
 
+    def handle_info({:tcp, socket, value}, aSource) do
+        msg = %Message{
+            source: aSource.id,
+            sender: aSource.id,
+            value: value,
+            chckptId: aSource.chckptId
+        }
+        Store.put(aSource.repNodes, aSource.chckptId, msg)
+        :gen_tcp.send(socket, "ack")
+        propagate(aSource, msg)    
+        {:noreply, aSource}
+    end
+
+    def handle_info({:tcp_closed, _socket}, aSource) do
+        Logger.info("tcp closed")
+        { :noreply, %{ aSource | socket: nil } }
+    end
+
+    def handle_info({:tcp_error, _socket, reason}, aSource) do
+        Logger.info("tcp error #{inspect reason}")
+        { :noreply, %{ aSource | socket: nil } }
+    end
+
+    def terminate(_reason, aSource) do
+        Utils.closeSocket(aSource)
+    end
 end

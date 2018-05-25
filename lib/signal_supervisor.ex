@@ -8,34 +8,17 @@ defmodule Signal.Supervisor do
     end
 
     def start(%Signal{}=aSignal) do
-        masterNode = node()
-        case Map.get(aSignal.routing, aSignal.id) do
-            ^masterNode -> Supervisor.start_child(__MODULE__, [aSignal])
-            node -> 
-                Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    Signal.Supervisor.start(aSignal)
-                end)
-                |> Task.await()
-        end
+        Supervisor.start_child(__MODULE__, [aSignal])
     end
-
-    def restart(node, id, chckptId, routing, repNodes, leader) do
-        currNode = node()
-        case node do
-            ^currNode -> 
-                aSignal = Store.get(id, chckptId)
-                aSignal = %{ aSignal | 
-                    repNodes: repNodes,
-                    routing: routing, 
-                    leader: leader
-                }
-                Supervisor.start_child(__MODULE__, [aSignal])
-            _ -> 
-                Task.Supervisor.async({Task.Spawner, node}, fn ->
-                    Signal.Supervisor.restart(node, id, chckptId, routing, repNodes, leader)
-                end)
-                |> Task.await()
-        end
+    
+    def restart(id, chckptId, routing, repNodes, leader) do
+        aSignal = Store.get(id, chckptId)
+        aSignal = %{ aSignal | 
+            repNodes: repNodes,
+            routing: routing, 
+            leader: leader
+        }
+        Supervisor.start_child(__MODULE__, [aSignal])
     end
 
     def init(:ok) do
