@@ -13,7 +13,6 @@ defmodule Drepel.Supervisor do
             {BSource.Supervisor, name: BSource.Supervisor},
             {ESource.Supervisor, name: ESource.Supervisor},
             {Node.Supervisor, name: Node.Supervisor},
-            {Task.Supervisor, name: Task.Spawner},
             {Store, name: Store},
             {Checkpoint, name: Checkpoint},
             {Balancer, name: Balancer},
