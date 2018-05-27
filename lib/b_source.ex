@@ -18,12 +18,12 @@ defmodule BSource do
 
 	# Client API
 
-	def start_link(_opts, aSource) do
-		GenServer.start_link(__MODULE__, aSource, name: aSource.id)
+    def start_link({aSource, messages}) do
+        GenServer.start_link(__MODULE__, {aSource, messages}, name: aSource.id)
     end
 
-    def start_link(_opts, aSource, messages) do
-        GenServer.start_link(__MODULE__, {aSource, messages}, name: aSource.id)
+    def start_link(aSource) do
+        GenServer.start_link(__MODULE__, aSource, name: aSource.id)
     end
 
 	# Server API

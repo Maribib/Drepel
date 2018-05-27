@@ -1,11 +1,10 @@
-require Drepel.Supervisor
 require MockNode
 
 defmodule Drepel do
     use Application
 
     def start(_type, _args) do
-        Drepel.Supervisor.start_link()
+        Main.Supervisor.start_link()
     end
 
     def stop(_state \\ nil) do

@@ -1,6 +1,6 @@
 require Logger
 
-defmodule Node.Supervisor do 
+defmodule ClusterSupervisor do 
 	defstruct [clustNodes: [], stopMessages: [], nodesDown: [] ]
 
 	use GenServer
@@ -62,7 +62,7 @@ defmodule Node.Supervisor do
 		# stop sampling
 		Sampler.stop()
 		# stop nodes (sources and signals)
-		supervisors = [BSource.Supervisor, ESource.Supervisor, Signal.Supervisor]
+		supervisors = [Source.Supervisor, Signal.Supervisor]
 		Enum.map(supervisors, &Utils.stopChildren(&1))
 		# Elect and alert new leader with stop message
 		clustNodes = state.clustNodes -- [nodeName]

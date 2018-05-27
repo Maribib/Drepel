@@ -36,7 +36,7 @@ defmodule Signal do
 
     # Client API
 
-    def start_link(_opts, aSignal) do
+    def start_link(aSignal) do
         GenServer.start_link(__MODULE__, aSignal, name: aSignal.id)
     end
 

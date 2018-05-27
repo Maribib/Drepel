@@ -23,8 +23,20 @@ defmodule Drepel.Env do
     end
 
     def stopAll(env) do
-        supervisors = [BSource.Supervisor, ESource.Supervisor, Signal.Supervisor]
-        Enum.map(supervisors, &Utils.stopChildren(&1, env.clustNodes))
+        supervisors = [Source.Supervisor, Signal.Supervisor]
+        Enum.map(supervisors, &stopAllChildren(env.clustNodes, &1))
+    end
+
+    def stopAllChildren(clustNodes, supervisor) do
+        req = {:stopAllChildren, supervisor}
+        Utils.multi_call(clustNodes -- [node()], __MODULE__, req)
+        handle_call(req, nil, nil)
+    end
+
+    def handle_call({:stopAllChildren, supervisor}, _from, env) do
+        Supervisor.which_children(supervisor)
+        |> Enum.map(&Supervisor.terminate_child(supervisor, elem(&1, 1)))
+        {:reply, :ok, env}
     end
 
     def listSinks(env) do
@@ -134,31 +146,27 @@ defmodule Drepel.Env do
     end
 
     def startSignals(env) do
-        Utils.multi_call(env.clustNodes -- [node()], __MODULE__, {:startSignals, env.clustNodes, env.routing})
-        handle_call({:startSignals, env.clustNodes, env.routing}, nil, env)
+        req = {:startSignals, env.clustNodes, env.routing}
+        Utils.multi_call(env.clustNodes -- [node()], __MODULE__, req)
+        handle_call(req, nil, env)
     end
 
     def startSources(env) do
-        Utils.multi_call(env.clustNodes -- [node()], __MODULE__, {:startSources, env.clustNodes, env.routing})
-        handle_call({:startSources, env.clustNodes, env.routing}, nil, env)
+        req = {:startSources, env.clustNodes, env.routing}
+        Utils.multi_call(env.clustNodes -- [node()], __MODULE__, req)
+        handle_call(req, nil, env)
     end
 
     def restartSignals(env, chckptId, clustNodes) do
-        Utils.multi_call(
-            env.clustNodes -- [node()], 
-            __MODULE__, 
-            {:restartSignals, clustNodes, env.routing, chckptId}
-        )
-        handle_call({:restartSignals, clustNodes, env.routing, chckptId}, nil, env)
+        req = {:restartSignals, clustNodes, env.routing, chckptId}
+        Utils.multi_call(env.clustNodes -- [node()], __MODULE__, req)
+        handle_call(req, nil, env)
     end
 
     def restartSources(env, chckptId, clustNodes) do
-        Utils.multi_call(
-            env.clustNodes -- [node()], 
-            __MODULE__, 
-            {:restartSources, clustNodes, env.routing, chckptId}
-        )
-        handle_call({:restartSources, clustNodes, env.routing, chckptId}, nil, env)
+        req = {:restartSources, clustNodes, env.routing, chckptId}
+        Utils.multi_call(env.clustNodes -- [node()], __MODULE__, req)
+        handle_call(req, nil, env)
     end
 
     def stopNodes do
@@ -201,14 +209,14 @@ defmodule Drepel.Env do
 
     def handle_call({:addClustNode, clustNode}, _from, env) do
         clustNodes = env.clustNodes ++ [clustNode]
-        Node.Supervisor.monitor(clustNodes)
+        ClusterSupervisor.monitor(clustNodes)
         { :reply, :ok, %{ env | clustNodes: clustNodes } }
     end
 
     def handle_call({:discover, clustNode}, _from, env) do
         leader = Enum.at(env.clustNodes, 0)
         Balancer.join(leader, clustNode)
-        Node.Supervisor.monitor(env.clustNodes ++ [clustNode])
+        ClusterSupervisor.monitor(env.clustNodes ++ [clustNode])
         env.clustNodes -- [node()]
         |> addClustNode(clustNode)
         newEnv = %{ env | clustNodes: env.clustNodes ++ [clustNode] }
@@ -222,7 +230,7 @@ defmodule Drepel.Env do
             newEnv = Drepel.Env.discover(node)
             case newEnv do
                 %__MODULE__{} -> 
-                    Node.Supervisor.monitor(newEnv.clustNodes)
+                    ClusterSupervisor.monitor(newEnv.clustNodes)
                     { :halt, newEnv }
                 :error -> { :cont, :error }
             end
@@ -326,8 +334,7 @@ defmodule Drepel.Env do
         |> Enum.filter(&(Map.get(routing, &1)==node()))
         |> Enum.map(fn id ->
             source = Map.get(env.nodes, id)
-            sourceSupervisor = Module.concat(source.__struct__, Supervisor)
-            sourceSupervisor.start(%{ source | 
+            Source.Supervisor.start_child(%{ source | 
                 routing: routing, 
                 repNodes: repNodes
             })
@@ -341,7 +348,7 @@ defmodule Drepel.Env do
         |> Enum.filter(&(Map.get(routing, &1)==node()))
         |> Enum.map(fn id -> 
             signal = Map.get(env.nodes, id)
-            Signal.Supervisor.start(%{ signal | 
+            Signal.Supervisor.start_child(%{ signal | 
                 routing: routing, 
                 repNodes: repNodes,
                 leader: Enum.at(clustNodes, 0)
@@ -370,7 +377,7 @@ defmodule Drepel.Env do
         sourcesRouting = Map.take(env.routing, env.sources)
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
         # set up nodes monitoring
-        Node.Supervisor.monitor(env.clustNodes)
+        ClusterSupervisor.monitor(env.clustNodes)
         # start signals
         startSignals(env)
         # start sources
@@ -417,16 +424,17 @@ defmodule Drepel.Env do
 
     def handle_call({:restartSignals, clustNodes, routing, chckptId}, _from, env) do
         repNodes = computeRepNodes(env, clustNodes, node())
+        leader = Enum.at(clustNodes, 0)
         Map.keys(env.nodes) -- env.sources
         |> Enum.each(fn id ->
-            Signal.Supervisor.restart( 
-                id, 
-                chckptId,
-                routing,
-                repNodes,
-                Enum.at(clustNodes, 0)
-            )
+            aSignal = Store.get(id, chckptId)
+            Signal.Supervisor.start_child(%{ aSignal | 
+                repNodes: repNodes,
+                routing: routing, 
+                leader: leader
+            })
         end)
+        { :reply, :ok, env }
     end
 
     def handle_call({:restartSources, clustNodes, routing, chckptId}, _from, env) do
@@ -434,9 +442,8 @@ defmodule Drepel.Env do
         env.sources 
         |> Enum.each(fn id ->
             aSource = Map.get(env.nodes, id)
-            sourceSupervisor = Module.concat(aSource.__struct__, Supervisor)
             messages = Store.getMessages(id, chckptId)
-            sourceSupervisor.restart(
+            Source.Supervisor.start_child(
                 %{ aSource | 
                     routing: routing,
                     repNodes: repNodes
@@ -444,6 +451,7 @@ defmodule Drepel.Env do
                 messages
             )
         end)
+        { :reply, :ok, env }
     end
 
     def handle_cast({:move, to, ids}, env) do

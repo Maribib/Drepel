@@ -1,4 +1,4 @@
-defmodule Drepel.Supervisor do
+defmodule Main.Supervisor do
     use Supervisor
 
     def start_link(_opt \\ nil) do
@@ -10,9 +10,8 @@ defmodule Drepel.Supervisor do
             {Drepel.Env, name: Drepel.Env},
             {Sampler, name: Sampler}, 
             {Signal.Supervisor, name: Signal.Supervisor}, 
-            {BSource.Supervisor, name: BSource.Supervisor},
-            {ESource.Supervisor, name: ESource.Supervisor},
-            {Node.Supervisor, name: Node.Supervisor},
+            {Source.Supervisor, name: Source.Supervisor},
+            {ClusterSupervisor, name: ClusterSupervisor},
             {Store, name: Store},
             {Checkpoint, name: Checkpoint},
             {Balancer, name: Balancer},
