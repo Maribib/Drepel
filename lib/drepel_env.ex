@@ -233,7 +233,7 @@ defmodule Drepel.Env do
 
     def handle_call({:discover, clustNode}, _from, env) do
         leader = Enum.at(env.clustNodes, 0)
-        IO.puts inspect :mnesia.change_config(:extra_db_nodes, [clustNode])
+        :mnesia.change_config(:extra_db_nodes, [clustNode])
         Balancer.join(leader, clustNode)
         ClusterSupervisor.monitor(env.clustNodes ++ [clustNode])
         env.clustNodes -- [node()]

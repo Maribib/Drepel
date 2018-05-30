@@ -53,7 +53,11 @@ defmodule Store do
     end
 
     def put(chckptId, message) do
-    	GenServer.call(__MODULE__, {:put, chckptId, message})
+    	res = GenServer.call(__MODULE__, {:put, chckptId, message})
+    	case res do
+	    	{:aborted, _} -> exit(:failed_transaction)
+	    	{:atomic, _} -> :ok
+	    end
     end
 
     def get(id, chckptId) do
