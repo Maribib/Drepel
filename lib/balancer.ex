@@ -105,14 +105,9 @@ defmodule Balancer do
             Logger.info("Balance decision: move #{inspect ids} from #{maxNode} to #{minNode}")
             if length(ids)>0 do
                 Checkpoint.stop()
-                cnt = Enum.map(ids, &GenServer.call({&1, state.routing[&1]}, {:addRepNode, minNode}))
-                |> Enum.filter(&(&1==:ok))
-                |> Enum.count()
-                if cnt>0 do
-                    Checkpoint.injectAndWaitForCompletion([minNode, ids])
-                else
-                    Drepel.Env.move(minNode, ids)
-                end
+                Store.replicate(maxNode, minNode, ids)    
+                Drepel.Env.move(minNode, ids)
+  
                 { :noreply, state }
             else
                 { :noreply, %{ state |

@@ -37,7 +37,7 @@ defmodule Store do
 	    		ram_copies: repNodes
 	    	])
 	    end)
-    	{ :reply, :ok, %{ state | ids: ids } }
+    	{ :reply, :ok, %{ state | ids: ids, repNodes: repNodes } }
     end
 
     def start_link(_opts) do
@@ -48,8 +48,8 @@ defmodule Store do
     	:mnesia.delete_schema(nodes)
     end
 
-    def setRepNodes(nodes) do
-    	GenServer.call(__MODULE__, {:setRepNodes, nodes})
+    def setRepNodes(repNodes, ids) do
+    	GenServer.call(__MODULE__, {:setRepNodes, repNodes, ids})
     end
 
     def put(chckptId, message) do
@@ -66,6 +66,17 @@ defmodule Store do
 
     def getMessages(id, chckptId) do
         GenServer.call(__MODULE__, {:getMessages, id, chckptId})
+    end
+
+    def replicate(from, to, ids) do
+    	GenServer.call({__MODULE__, from}, {:replicate, to, ids})
+    end
+
+    def handle_call({:replicate, to, ids}, _, state) do
+    	Enum.map(ids, fn id ->
+    		:mnesia.add_table_copy(id, to, :ram_copies)
+    	end)
+    	{ :reply, :ok, state }
     end
 
     # Server API
@@ -118,15 +129,13 @@ defmodule Store do
     	{ :reply, elem(res, 1), state }
     end	
 
-    def handle_call({:setRepNodes, nodes}, _from, state) do
-    	#newRepNodes = nodes -- state.repNodes
-		#Enum.map(newRepNodes, fn repNode ->
-		#	x = :mnesia.add_table_copy(Message, repNode, :ram_copies)
-		#	IO.puts inspect x
-		#	y = :mnesia.add_table_copy(Signal, repNode, :ram_copies)
-		#	IO.puts inspect y
-		#end)
-    	{ :reply, :ok, state}
+    def handle_call({:setRepNodes, repNodes, ids}, _from, state) do
+    	Enum.each(ids, fn id ->
+    		Enum.each(repNodes, fn repNode ->
+				:mnesia.add_table_copy(id, repNode, :ram_copies)
+    		end)
+    	end)
+    	{ :reply, :ok, %{ state | repNodes: repNodes, ids: ids } }
     end
 
     def handle_cast({:clean, chckptId}, state) do

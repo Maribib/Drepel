@@ -167,14 +167,6 @@ defmodule Signal do
             Enum.map(aSignal.parents, &send({&1, Map.get(aSignal.routing, &1)}, :start))
         end
         { :noreply, aSignal }
-    end 
-
-    #def handle_call({:addRepNode, node}, _from, aSignal) do 
-    #    if Enum.member?(aSignal.repNodes, node) do
-    #        { :reply, :already, aSignal }
-    #    else
-    #        { :reply, :ok, update_in(aSignal.repNodes, &(&1 ++ [node])) }
-    #    end
-    #end
+    end
 
 end

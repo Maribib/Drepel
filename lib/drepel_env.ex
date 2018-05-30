@@ -73,13 +73,15 @@ defmodule Drepel.Env do
     def _restore(env, chckptId) do
         leader = Enum.at(env.clustNodes, 0)
         # replicate env
-        Enum.filter(env.clustNodes, &(&1!=node()))
+        env.clustNodes -- [node()]
         |> Drepel.Env.replicate(env)
         # reset stats
         resetStats(env.routing)
         # reset checkpointing
         sourcesRouting = Map.take(env.routing, env.sources)
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
+        # 
+        updateRepNodes(env)
         # restart all signals
         restartSignals(env, chckptId, env.clustNodes)
         # restart all sources
@@ -196,9 +198,8 @@ defmodule Drepel.Env do
     end
 
     def updateRepNodes(env) do
-        req = {:updateRepNodes, env.clustNodes}
-        GenServer.multi_call(env.clustNodes -- [node()], __MODULE__, req)
-        handle_call(req, nil, env)
+        GenServer.multi_call(env.clustNodes -- [node()], __MODULE__, :updateRepNodes )
+        handle_call(:updateRepNodes , nil, env)
     end
 
     
@@ -222,14 +223,17 @@ defmodule Drepel.Env do
         { :reply, :ok, %{ env | clustNodes: clustNodes } }
     end
 
-    def handle_call({:updateRepNodes, clustNodes}, _from, env) do
-        computeRepNodes(env, clustNodes, node()) 
-        |> Store.setRepNodes()
+    def handle_call(:updateRepNodes, _from, env) do
+        repNodes = computeRepNodes(env, env.clustNodes, node()) 
+        ids = Enum.filter(env.routing, &(elem(&1,1)==node()))
+        |> Enum.map(&(elem(&1,0)))
+        Store.setRepNodes(repNodes, ids)
         { :reply, :ok, env}
     end
 
     def handle_call({:discover, clustNode}, _from, env) do
         leader = Enum.at(env.clustNodes, 0)
+        IO.puts inspect :mnesia.change_config(:extra_db_nodes, [clustNode])
         Balancer.join(leader, clustNode)
         ClusterSupervisor.monitor(env.clustNodes ++ [clustNode])
         env.clustNodes -- [node()]
@@ -241,6 +245,7 @@ defmodule Drepel.Env do
     def handle_call({:join, nodes}, _from, env) do
         Sampler.reset(node(), [])
         Sampler.start()
+        :mnesia.start()
         res = Enum.reduce_while(nodes, nil, fn node, _ ->
             newEnv = Drepel.Env.discover(node)
             case newEnv do
@@ -389,15 +394,14 @@ defmodule Drepel.Env do
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
         # set up nodes monitoring
         ClusterSupervisor.monitor(env.clustNodes)
-        #
+        # init store
         Store.start(env.clustNodes)
         Store.createTables(env)
-        updateRepNodes(env)
         # start signals
         startSignals(env)
         # start sources
         startSources(env)
-        #
+        # TODO
         MyStuff.reset(Enum.map(env.eSources, fn id ->
             name = Map.get(env.nodes, id).name
             { Map.get(env.routing, id), {id, name} }

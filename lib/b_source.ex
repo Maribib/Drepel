@@ -107,11 +107,4 @@ defmodule BSource do
         end
     end
 
-    #def handle_call({:addRepNode, node}, _from, aSource) do 
-    #    if Enum.member?(aSource.repNodes, node) do
-    #        { :reply, :already, aSource }
-    #    else
-    #        { :reply, :ok, update_in(aSource.repNodes, &(&1 ++ [node])) }
-    #    end
-    #end
 end
