@@ -3,7 +3,7 @@ require Logger
 defmodule ESource do
     @enforce_keys [ :id, :name, :default ]
     defstruct [ :id, :default, :dependencies, :name, :server,
-    children: [], startReceived: 0, repNodes: [],
+    children: [], startReceived: 0,
     chckptId: 0, routing: %{}, socket: nil]
     
     use GenServer, restart: :transient
@@ -69,7 +69,7 @@ defmodule ESource do
                 id: chckptId,
                 sender: aSource.id 
             }
-            Store.put(aSource.repNodes, chckptId-1, msg)
+            Store.put(chckptId-1, msg)
             propagate(aSource, msg)
             { :noreply, %{ aSource |
                 chckptId: chckptId
@@ -95,7 +95,7 @@ defmodule ESource do
             value: value,
             chckptId: aSource.chckptId
         }
-        Store.put(aSource.repNodes, aSource.chckptId, msg)
+        Store.put(aSource.chckptId, msg)
         :gen_tcp.send(socket, "ack")
         propagate(aSource, msg)    
         {:noreply, aSource}

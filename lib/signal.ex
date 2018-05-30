@@ -3,7 +3,7 @@ defmodule Signal do
     defstruct [ :id, :fct, :args, :dependencies, :buffs, :default,
     :chckpts, :leader,
     parents: [], children: [], startReceived: 0, state: %Sentinel{}, 
-    hasChildren: false, repNodes: [], routing: %{} ]
+    hasChildren: false, routing: %{} ]
 
     use GenServer, restart: :transient
     
@@ -113,7 +113,7 @@ defmodule Signal do
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
-            Store.put(aSignal.repNodes, id, aSignal)
+            Store.put(id, aSignal)
             if !aSignal.hasChildren do
                 Checkpoint.completed(aSignal.leader, aSignal.id, id)
             end
@@ -152,7 +152,7 @@ defmodule Signal do
                 end)
             end
             # copy initial state in case of failure before first checkpoint completion
-            Store.put(aSignal.repNodes, -1, aSignal)
+            Store.put(-1, aSignal)
             %{ aSignal | state: state }
         else
             aSignal
@@ -169,12 +169,12 @@ defmodule Signal do
         { :noreply, aSignal }
     end 
 
-    def handle_call({:addRepNode, node}, _from, aSignal) do 
-        if Enum.member?(aSignal.repNodes, node) do
-            { :reply, :already, aSignal }
-        else
-            { :reply, :ok, update_in(aSignal.repNodes, &(&1 ++ [node])) }
-        end
-    end
+    #def handle_call({:addRepNode, node}, _from, aSignal) do 
+    #    if Enum.member?(aSignal.repNodes, node) do
+    #        { :reply, :already, aSignal }
+    #    else
+    #        { :reply, :ok, update_in(aSignal.repNodes, &(&1 ++ [node])) }
+    #    end
+    #end
 
 end

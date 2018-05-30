@@ -2,9 +2,9 @@ require Signal
 
 defmodule BSource do 
 	@enforce_keys [ :id, :refreshRate, :fct, :default ]
-	defstruct [ :id, :refreshRate, :fct, :default, :dependencies, 
-    :clustNodes, :repNodes,
-	children: [], startReceived: 0, prodTimer: nil, repNodes: [],
+	defstruct [ :id, :refreshRate, :fct, :default, 
+    :dependencies, :clustNodes,
+	children: [], startReceived: 0, prodTimer: nil,
     chckptId: 0, routing: %{}]
 
 	use GenServer, restart: :transient
@@ -69,7 +69,7 @@ defmodule BSource do
             value: aSource.fct.(),
             chckptId: aSource.chckptId
         }
-        Store.put(aSource.repNodes, aSource.chckptId, msg)
+        Store.put(aSource.chckptId, msg)
     	propagate(aSource, msg)
     	{ :noreply, %{ aSource | prodTimer: prodTimer } }
     end
@@ -97,7 +97,7 @@ defmodule BSource do
                 id: chckptId,
                 sender: aSource.id 
             }
-            Store.put(aSource.repNodes, chckptId-1, msg)
+            Store.put(chckptId-1, msg)
             propagate(aSource, msg)
             { :noreply, %{ aSource |
                 chckptId: chckptId
@@ -107,11 +107,11 @@ defmodule BSource do
         end
     end
 
-    def handle_call({:addRepNode, node}, _from, aSource) do 
-        if Enum.member?(aSource.repNodes, node) do
-            { :reply, :already, aSource }
-        else
-            { :reply, :ok, update_in(aSource.repNodes, &(&1 ++ [node])) }
-        end
-    end
+    #def handle_call({:addRepNode, node}, _from, aSource) do 
+    #    if Enum.member?(aSource.repNodes, node) do
+    #        { :reply, :already, aSource }
+    #    else
+    #        { :reply, :ok, update_in(aSource.repNodes, &(&1 ++ [node])) }
+    #    end
+    #end
 end
