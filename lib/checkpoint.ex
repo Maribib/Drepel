@@ -1,19 +1,10 @@
 require Logger
 
 defmodule Checkpoint do
-    defstruct [:timer, :sourcesRouting, :chckptInterval, :waiting,
+    defstruct [:timer, :sourcesRouting, :chckptInterval,
     lastCompleted: -1, chckptId: 0, clustNodes: [], buffs: %{}]
 
     use GenServer
-
-    def onComplete(state, chckptId) do
-        if !is_nil(state.waiting) && state.waiting.id==chckptId do
-            apply(&Drepel.Env.move/2, state.waiting.args)
-            %{ state | waiting: nil }
-        else
-            state
-        end
-    end
     
     # Client API
 
@@ -90,7 +81,6 @@ defmodule Checkpoint do
                 clustNodes: clustNodes,
                 sourcesRouting: sourcesRouting,
                 chckptInterval: chckptInterval,
-                waiting: nil
             }
         }
     end
@@ -101,14 +91,6 @@ defmodule Checkpoint do
 
     def handle_call(:lastCompleted, _from, state) do
         { :reply, state.lastCompleted, state }
-    end
-
-    def handle_call({:injectAndWaitForCompletion, args}, _from, state) do
-        Enum.map(state.sourcesRouting, &GenServer.cast(&1, {:checkpoint, state.chckptId}))
-        { :reply, :ok, %{ state |
-            chckptId: state.chckptId+1,
-            waiting: %{ id: state.chckptId, args: args }
-        } }
     end
 
     def handle_cast({:completed, sink, chckptId}, state) do
@@ -124,8 +106,6 @@ defmodule Checkpoint do
             |> Checkpoint.setLastCompleted(chckptId)
             # clean stores
             Enum.map(state.clustNodes, &Store.clean(&1, chckptId-1))
-            # completion callback
-            state = onComplete(state, chckptId)
             { :noreply, %{ state |
                 buffs: Enum.reduce(state.buffs, %{}, fn {id, cnt}, acc ->
                     Map.put(acc, id, cnt-1)

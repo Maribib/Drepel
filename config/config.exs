@@ -31,3 +31,4 @@ use Mix.Config
 
 config :drepel, tcp_ip: {127, 0, 0, 1}
 config :drepel, tcp_port: 9999
+config :mnesia, schema_location: :ram

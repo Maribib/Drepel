@@ -80,8 +80,6 @@ defmodule Drepel.Env do
         # reset checkpointing
         sourcesRouting = Map.take(env.routing, env.sources)
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
-        # 
-        updateRepNodes(env)
         # restart all signals
         restartSignals(env, chckptId, env.clustNodes)
         # restart all sources
@@ -133,8 +131,8 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, {:createSignal, parents, fct, initState, node})
     end
 
-    def move(to, ids) do
-        GenServer.cast(__MODULE__, {:move, to, ids})
+    def move(from, to, ids) do
+        GenServer.cast(__MODULE__, {:move, from, to, ids})
     end
 
     def startNodes(duration) do
@@ -197,12 +195,14 @@ defmodule Drepel.Env do
         Utils.multi_call(nodes, __MODULE__,  {:addClustNode, clustNode})
     end
 
-    def updateRepNodes(env) do
-        GenServer.multi_call(env.clustNodes -- [node()], __MODULE__, :updateRepNodes )
-        handle_call(:updateRepNodes , nil, env)
+    def computeTableInfos(env) do
+        Enum.reduce(env.clustNodes, %{}, fn node, acc ->
+            repNodes = Drepel.Env.computeRepNodes(env, env.clustNodes, node)
+            ids = Enum.filter(env.routing, &(elem(&1,1)==node))
+            |> Enum.map(&elem(&1,0))
+            Map.put(acc, node, {repNodes, ids})
+        end)
     end
-
-    
 
     # Server API
 
@@ -221,14 +221,6 @@ defmodule Drepel.Env do
         clustNodes = env.clustNodes ++ [clustNode]
         ClusterSupervisor.monitor(clustNodes)
         { :reply, :ok, %{ env | clustNodes: clustNodes } }
-    end
-
-    def handle_call(:updateRepNodes, _from, env) do
-        repNodes = computeRepNodes(env, env.clustNodes, node()) 
-        ids = Enum.filter(env.routing, &(elem(&1,1)==node()))
-        |> Enum.map(&(elem(&1,0)))
-        Store.setRepNodes(repNodes, ids)
-        { :reply, :ok, env}
     end
 
     def handle_call({:discover, clustNode}, _from, env) do
@@ -396,7 +388,8 @@ defmodule Drepel.Env do
         ClusterSupervisor.monitor(env.clustNodes)
         # init store
         Store.start(env.clustNodes)
-        Store.createTables(env)
+        tableInfos = computeTableInfos(env)
+        Store.createTables(env.clustNodes, tableInfos)
         # start signals
         startSignals(env)
         # start sources
@@ -437,6 +430,8 @@ defmodule Drepel.Env do
     def handle_call({:restore, chckptId, clustNodes, nodesDown}, _from, env) do
         newRouting = computeNewRouting(env, nodesDown)
         env = %{ env | clustNodes: clustNodes, routing: newRouting }
+        tableInfos = computeTableInfos(env)
+        Store.updateRepNodes(clustNodes, tableInfos)
         _restore(env, chckptId)
         { :reply, :ok, env }
     end
@@ -469,13 +464,29 @@ defmodule Drepel.Env do
         { :reply, :ok, env }
     end
 
-    def handle_cast({:move, to, ids}, env) do
+    def handle_cast({:move, from, to, ids}, env) do
+        Checkpoint.stop()
         # stop all sources/signals
         stopAll(env)
         # compute new routing
         newRouting = Enum.reduce(ids, env.routing, &Map.put(&2, &1, to))
         # restore last checkpoint
         chckptId = Checkpoint.lastCompleted()
+
+        oldRepNodes = computeRepNodes(env, env.clustNodes, from)
+        newRepNodes = computeRepNodes(env, env.clustNodes, to)
+        toAdd = newRepNodes -- oldRepNodes
+        toDel = oldRepNodes -- newRepNodes
+        IO.puts "toAdd #{inspect toAdd} toDel #{inspect toDel}"
+        Enum.each(ids, fn id ->
+            Enum.each(toAdd, fn node -> 
+                IO.puts inspect :mnesia.add_table_copy(id, node, :ram_copies)
+            end)
+            Enum.each(toDel, fn node -> 
+                IO.puts inspect :mnesia.del_table_copy(id, node)
+            end)
+        end)
+
         env = %{ env | routing: newRouting}
         _restore(env, chckptId)
         { :noreply, env }

@@ -103,11 +103,8 @@ defmodule Balancer do
             end)
             ids = decideBalancing(utilById, maxMeanUtil, minMeanUtil, [])
             Logger.info("Balance decision: move #{inspect ids} from #{maxNode} to #{minNode}")
-            if length(ids)>0 do
-                Checkpoint.stop()
-                Store.replicate(maxNode, minNode, ids)    
-                Drepel.Env.move(minNode, ids)
-  
+            if length(ids)>0 do 
+                Drepel.Env.move(maxNode, minNode, ids)
                 { :noreply, state }
             else
                 { :noreply, %{ state |

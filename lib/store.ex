@@ -15,17 +15,12 @@ defmodule Store do
     	:mnesia.create_schema(clustNodes)
     	Utils.multi_call(clustNodes--[node()], __MODULE__, :start)
     	handle_call(:start, nil, nil)
+    	IO.puts inspect :mnesia.change_config(:extra_db_nodes, clustNodes)
     end
 
-    def createTables(env) do
-    	tableInfos = Enum.reduce(env.clustNodes, %{}, fn node, acc ->
-            repNodes = Drepel.Env.computeRepNodes(env, env.clustNodes, node)
-            ids = Enum.filter(env.routing, &(elem(&1,1)==node))
-            |> Enum.map(&elem(&1,0))
-            Map.put(acc, node, {repNodes, ids})
-        end)
+    def createTables(clustNodes, tableInfos) do
     	req = {:createTables, tableInfos}
-    	Utils.multi_call(env.clustNodes, __MODULE__, req)
+    	Utils.multi_call(clustNodes, __MODULE__, req)
     end
 
     def handle_call({:createTables, tableInfos}, _from, state) do
@@ -37,6 +32,7 @@ defmodule Store do
 	    		ram_copies: repNodes
 	    	])
 	    end)
+	    IO.puts inspect :mnesia.system_info(:local_tables)
     	{ :reply, :ok, %{ state | ids: ids, repNodes: repNodes } }
     end
 
@@ -48,8 +44,8 @@ defmodule Store do
     	:mnesia.delete_schema(nodes)
     end
 
-    def setRepNodes(repNodes, ids) do
-    	GenServer.call(__MODULE__, {:setRepNodes, repNodes, ids})
+    def updateRepNodes(clustNodes, tableInfos) do
+        GenServer.multi_call(clustNodes, Store, {:updateRepNodes, tableInfos})
     end
 
     def put(chckptId, message) do
@@ -80,6 +76,7 @@ defmodule Store do
     	Enum.map(ids, fn id ->
     		:mnesia.add_table_copy(id, to, :ram_copies)
     	end)
+    	IO.puts inspect :mnesia.system_info(:local_tables)
     	{ :reply, :ok, state }
     end
 
@@ -133,12 +130,15 @@ defmodule Store do
     	{ :reply, elem(res, 1), state }
     end	
 
-    def handle_call({:setRepNodes, repNodes, ids}, _from, state) do
+    def handle_call({:updateRepNodes, tableInfos}, _from, state) do
+    	{repNodes, ids} = Map.get(tableInfos, node())
+    	IO.puts "node #{node()} repNodes #{inspect repNodes} ids #{inspect ids}"
     	Enum.each(ids, fn id ->
     		Enum.each(repNodes, fn repNode ->
 				:mnesia.add_table_copy(id, repNode, :ram_copies)
     		end)
     	end)
+    	IO.puts inspect :mnesia.system_info(:local_tables)
     	{ :reply, :ok, %{ state | repNodes: repNodes, ids: ids } }
     end
 
