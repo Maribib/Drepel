@@ -207,7 +207,6 @@ defmodule Drepel.Env do
     # Server API
 
     def init(:ok) do
-        :mnesia.delete_schema([node()])
         { :ok, %__MODULE__{} }
     end
 
@@ -225,7 +224,7 @@ defmodule Drepel.Env do
 
     def handle_call({:discover, clustNode}, _from, env) do
         leader = Enum.at(env.clustNodes, 0)
-        :mnesia.change_config(:extra_db_nodes, [clustNode])
+        Store.discover(clustNode)
         Balancer.join(leader, clustNode)
         ClusterSupervisor.monitor(env.clustNodes ++ [clustNode])
         env.clustNodes -- [node()]
@@ -237,7 +236,7 @@ defmodule Drepel.Env do
     def handle_call({:join, nodes}, _from, env) do
         Sampler.reset(node(), [])
         Sampler.start()
-        :mnesia.start()
+        Store.start()
         res = Enum.reduce_while(nodes, nil, fn node, _ ->
             newEnv = Drepel.Env.discover(node)
             case newEnv do
@@ -473,19 +472,7 @@ defmodule Drepel.Env do
         # restore last checkpoint
         chckptId = Checkpoint.lastCompleted()
 
-        oldRepNodes = computeRepNodes(env, env.clustNodes, from)
-        newRepNodes = computeRepNodes(env, env.clustNodes, to)
-        toAdd = newRepNodes -- oldRepNodes
-        toDel = oldRepNodes -- newRepNodes
-        IO.puts "toAdd #{inspect toAdd} toDel #{inspect toDel}"
-        Enum.each(ids, fn id ->
-            Enum.each(toAdd, fn node -> 
-                IO.puts inspect :mnesia.add_table_copy(id, node, :ram_copies)
-            end)
-            Enum.each(toDel, fn node -> 
-                IO.puts inspect :mnesia.del_table_copy(id, node)
-            end)
-        end)
+        Store.move(env, from, to, ids)
 
         env = %{ env | routing: newRouting}
         _restore(env, chckptId)

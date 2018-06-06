@@ -23,16 +23,6 @@ defmodule Utils do
 		end)
     end
 
-    def stopChildren(supervisor, nodes) do
-        Enum.map(nodes, fn node ->
-            Task.Supervisor.async({Task.Spawner, node}, fn ->
-                Supervisor.which_children(supervisor)
-                |> Enum.map(&Supervisor.terminate_child(supervisor, elem(&1, 1)))
-            end)
-        end)
-        |> Enum.map(&Task.await(&1))
-    end
-
     def multi_call(nodes, name, msg) do
     	{_, bad_nodes} = GenServer.multi_call(nodes, name, msg)
 		if length(bad_nodes)>0 do

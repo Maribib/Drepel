@@ -11,16 +11,17 @@ defmodule Store do
     
     # Client API
 
+    def start do
+    	:mnesia.start()
+    end
+
     def start(clustNodes) do
     	:mnesia.create_schema(clustNodes)
-    	Utils.multi_call(clustNodes--[node()], __MODULE__, :start)
-    	handle_call(:start, nil, nil)
-    	IO.puts inspect :mnesia.change_config(:extra_db_nodes, clustNodes)
+    	Utils.multi_call(clustNodes, __MODULE__, :start)
     end
 
     def createTables(clustNodes, tableInfos) do
-    	req = {:createTables, tableInfos}
-    	Utils.multi_call(clustNodes, __MODULE__, req)
+    	Utils.multi_call(clustNodes, __MODULE__, {:createTables, tableInfos})
     end
 
     def handle_call({:createTables, tableInfos}, _from, state) do
@@ -32,7 +33,6 @@ defmodule Store do
 	    		ram_copies: repNodes
 	    	])
 	    end)
-	    IO.puts inspect :mnesia.system_info(:local_tables)
     	{ :reply, :ok, %{ state | ids: ids, repNodes: repNodes } }
     end
 
@@ -48,8 +48,16 @@ defmodule Store do
         GenServer.multi_call(clustNodes, Store, {:updateRepNodes, tableInfos})
     end
 
+    def _put(chckptId, message) do
+
+    end
+
+    def _put(chckptId, message) do
+
+    end
+
     def put(chckptId, message) do
-    	res = GenServer.call(__MODULE__, {:put, chckptId, message})
+    	res = _put(chckptId, message)
     	case res do
 	    	{:aborted, _} -> exit(:failed_transaction)
 	    	{:atomic, _} -> :ok
@@ -57,7 +65,12 @@ defmodule Store do
     end
 
     def get(id, chckptId) do
-    	GenServer.call(__MODULE__, {:get, id, chckptId})
+    	:mnesia.transaction(fn ->
+    		:mnesia.match_object({id, chckptId, :_})
+    	end)
+    	|> elem(1)
+    	|> List.last()
+		|> elem(2)
     end
 
     def clean(nodeName, chckptId) do
@@ -65,7 +78,18 @@ defmodule Store do
     end
 
     def getMessages(id, chckptId) do
-        GenServer.call(__MODULE__, {:getMessages, id, chckptId})
+    	:mnesia.transaction(fn ->
+    		:mnesia.select(id, 
+				[
+					{
+						{id, :"$1", :"$2"}, 
+						[{:>=, :"$1", chckptId}],
+						[:"$2"]
+					}
+				]
+	    	)
+    	end)
+    	|> elem(1)
     end
 
     def replicate(from, to, ids) do
@@ -76,8 +100,26 @@ defmodule Store do
     	Enum.map(ids, fn id ->
     		:mnesia.add_table_copy(id, to, :ram_copies)
     	end)
-    	IO.puts inspect :mnesia.system_info(:local_tables)
     	{ :reply, :ok, state }
+    end
+
+    def discover(clustNode) do
+    	:mnesia.change_config(:extra_db_nodes, [clustNode])
+    end
+
+    def move(env, from, to, ids) do
+    	oldRepNodes = Drepel.Env.computeRepNodes(env, env.clustNodes, from)
+        newRepNodes = Drepel.Env.computeRepNodes(env, env.clustNodes, to)
+        toAdd = newRepNodes -- oldRepNodes
+        toDel = oldRepNodes -- newRepNodes
+        Enum.each(ids, fn id ->
+            Enum.each(toAdd, fn node -> 
+                :mnesia.add_table_copy(id, node, :ram_copies)
+            end)
+            Enum.each(toDel, fn node -> 
+                :mnesia.del_table_copy(id, node)
+            end)
+        end)
     end
 
     # Server API
@@ -105,40 +147,13 @@ defmodule Store do
 	    { :reply, res, state }
     end
 
-    def handle_call({:get, id, chckptId}, _from, state) do
-    	res = :mnesia.transaction(fn ->
-    		:mnesia.match_object({id, chckptId, :_})
-    	end)
-    	|> elem(1)
-    	|> List.last()
-		|> elem(2)
-    	{ :reply, res, state }
-    end
-
-    def handle_call({:getMessages, id, chckptId}, _from, state) do
-    	res = :mnesia.transaction(fn ->
-    		:mnesia.select(id, 
-				[
-					{
-						{id, :"$1", :"$2"}, 
-						[{:>=, :"$1", chckptId}],
-						[:"$2"]
-					}
-				]
-	    	)
-    	end)
-    	{ :reply, elem(res, 1), state }
-    end	
-
     def handle_call({:updateRepNodes, tableInfos}, _from, state) do
     	{repNodes, ids} = Map.get(tableInfos, node())
-    	IO.puts "node #{node()} repNodes #{inspect repNodes} ids #{inspect ids}"
     	Enum.each(ids, fn id ->
     		Enum.each(repNodes, fn repNode ->
 				:mnesia.add_table_copy(id, repNode, :ram_copies)
     		end)
     	end)
-    	IO.puts inspect :mnesia.system_info(:local_tables)
     	{ :reply, :ok, %{ state | repNodes: repNodes, ids: ids } }
     end
 

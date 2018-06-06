@@ -19,7 +19,7 @@ defmodule Signal do
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
-            aSignal = consume(aSignal, source)
+            aSignal = reevaluate(aSignal, source)
             _unblock(aSignal, source, chckptId)
         else
             aSignal
@@ -65,7 +65,7 @@ defmodule Signal do
         } }
     end
 
-    def consume(aSignal, source) do
+    def reevaluate(aSignal, source) do
         {aSignal, message} = Enum.reduce(aSignal.buffs[source], {aSignal, nil}, fn {parentId, queue}, {aSignal, _} ->
             {{:value, message}, queue} = :queue.out(queue)
             {
@@ -98,7 +98,7 @@ defmodule Signal do
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
-            { :noreply, consume(aSignal, source) }
+            { :noreply, reevaluate(aSignal, source) }
         else
             { :noreply, aSignal }
         end
@@ -113,7 +113,7 @@ defmodule Signal do
             { ready && :cont || :halt, acc && ready }
         end)
         if ready do
-            Store.put(id, aSignal)
+            Store.put(id, %{ aSignal | buffs: nil })
             if !aSignal.hasChildren do
                 Checkpoint.completed(aSignal.leader, aSignal.id, id)
             end
@@ -152,7 +152,7 @@ defmodule Signal do
                 end)
             end
             # copy initial state in case of failure before first checkpoint completion
-            Store.put(-1, aSignal)
+            Store.put(-1, aSignal )
             %{ aSignal | state: state }
         else
             aSignal
