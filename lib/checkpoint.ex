@@ -105,7 +105,7 @@ defmodule Checkpoint do
             Enum.filter(state.clustNodes, &(&1!=node()))
             |> Checkpoint.setLastCompleted(chckptId)
             # clean stores
-            Enum.map(state.clustNodes, &Store.clean(&1, chckptId-1))
+            Store.clean(state.clustNodes, chckptId-1)
             { :noreply, %{ state |
                 buffs: Enum.reduce(state.buffs, %{}, fn {id, cnt}, acc ->
                     Map.put(acc, id, cnt-1)

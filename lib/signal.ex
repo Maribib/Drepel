@@ -48,8 +48,6 @@ defmodule Signal do
         GenServer.cast({id, aNode}, {:propagateDefault, sender, value})
     end
 
- 
-
     # Server API
 
     def init(%__MODULE__{dependencies: deps}=aSignal) do
