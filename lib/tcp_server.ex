@@ -65,6 +65,7 @@ defmodule TCPServer do
     # Client API
 
     def start_link(_opts) do 
+        IO.puts "start"
         GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
     end
 
