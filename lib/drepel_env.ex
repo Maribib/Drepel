@@ -111,6 +111,10 @@ defmodule Drepel.Env do
         GenServer.call(__MODULE__, {:setBalancingInterval, interval})
     end
 
+    def setReplicationFactor(factor) do
+        GenServer.call(__MODULE__, {:setReplicationFactor, factor})
+    end
+
     def createBSource(refreshRate, fct, default, opts) do
         node = :proplists.get_value(:node, opts, node())
         GenServer.call(__MODULE__, {:createBSource, refreshRate, fct, default, node})
@@ -262,6 +266,10 @@ defmodule Drepel.Env do
 
     def handle_call({:setBalancingInterval, interval}, _from, env) do
         { :reply, :ok, %{ env | balancingInterval: interval} }
+    end
+
+    def handle_call({:setReplicationFactor, factor}, _from, env) do
+        { :reply, :ok, %{ env | repFactor: factor} }
     end
 
     def handle_call({:replicate, env}, _from, _env) do
