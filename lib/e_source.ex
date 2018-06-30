@@ -33,7 +33,6 @@ defmodule ESource do
 
     def init(%__MODULE__{id: sid}=aSource) do
         Process.flag(:trap_exit, true)
-        name = String.to_atom("tcp_#{Atom.to_string(aSource.id)}")
         Enum.map(aSource.children, fn id ->
             node = Map.get(aSource.routing, id)
             Signal.propagateDefault(node, id, sid, aSource.default)
@@ -51,7 +50,6 @@ defmodule ESource do
             propagate(aSource, msg)
             chckptId
         end)
-        name = String.to_atom("tcp_#{Atom.to_string(aSource.id)}")
         {:ok, %{ aSource |
             chckptId: chckptId
         } }

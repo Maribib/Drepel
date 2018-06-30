@@ -92,7 +92,7 @@ defmodule Drepel do
                 res = predicate.(new) && new || old 
                 { res, res }
             end
-            reduce(parent, initState, fct, opts)
+            stateSignal(parent, initState, fct, opts)
         else
             throw "The arity of the predicate function must be 1."
         end
