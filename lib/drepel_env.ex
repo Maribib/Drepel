@@ -374,7 +374,7 @@ defmodule Drepel.Env do
         if length(env.clustNodes)<env.repFactor do
             raise "replication factor is too high"
         end
-        Enum.filter(env.clustNodes, &(&1!=node()))
+        env.clustNodes -- [node()]
         |> Drepel.Env.replicate(env)
         # reset stats
         resetStats(env.routing)

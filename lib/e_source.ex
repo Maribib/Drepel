@@ -2,7 +2,7 @@ require Logger
 
 defmodule ESource do
     @enforce_keys [ :id, :name, :default ]
-    defstruct [ :id, :default, :dependencies, :name, :server,
+    defstruct [ :id, :default, :dependencies, :name,
     children: [], startReceived: 0,
     chckptId: 0, routing: %{}, socket: nil]
     
@@ -38,7 +38,7 @@ defmodule ESource do
             node = Map.get(aSource.routing, id)
             Signal.propagateDefault(node, id, sid, aSource.default)
         end)
-        { :ok, %{ aSource | server: name } }
+        { :ok, aSource }
     end
 
     def init({%__MODULE__{}=aSource, messages}) do
@@ -53,8 +53,7 @@ defmodule ESource do
         end)
         name = String.to_atom("tcp_#{Atom.to_string(aSource.id)}")
         {:ok, %{ aSource |
-            chckptId: chckptId,
-            server: name
+            chckptId: chckptId
         } }
     end
 
@@ -98,7 +97,7 @@ defmodule ESource do
         Store.put(aSource.chckptId, msg)
         :gen_tcp.send(socket, "ack")
         propagate(aSource, msg)    
-        {:noreply, aSource}
+        { :noreply, aSource }
     end
 
     def handle_info({:tcp_closed, _socket}, aSource) do
@@ -112,6 +111,6 @@ defmodule ESource do
     end
 
     def terminate(_reason, aSource) do
-        Utils.closeSocket(aSource)
+        Utils.closeSocket(aSource.socket)
     end
 end
