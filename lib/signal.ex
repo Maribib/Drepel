@@ -1,7 +1,7 @@
 defmodule Signal do
     @enforce_keys [:id, :fct, :args]
     defstruct [ :id, :fct, :args, :dependencies, :buffs, :default,
-    :chckpts, :leader,
+    :chckpts, :leader, :readyCnt,
     parents: [], children: [], startReceived: 0, state: %Sentinel{}, 
     hasChildren: false, routing: %{} ]
 
@@ -14,11 +14,8 @@ defmodule Signal do
     end
 
     def _unblock(aSignal, source, chckptId) do
-        ready = Enum.reduce_while(aSignal.buffs[source], true, fn {_, queue}, acc ->
-            ready = (!:queue.is_empty(queue)) && (:queue.head(queue).chckptId==chckptId)
-            { ready && :cont || :halt, acc && ready }
-        end)
-        if ready do
+        if aSignal.readyCnt==Map.size(aSignal.buffs[source]) 
+            && :queue.head(Enum.at(aSignal.buffs[source], 0) |> elem(1)).chckptId==chckptId do
             aSignal = reevaluate(aSignal, source)
             _unblock(aSignal, source, chckptId)
         else
@@ -51,25 +48,37 @@ defmodule Signal do
     # Server API
 
     def init(%__MODULE__{dependencies: deps}=aSignal) do
+        buffs = Enum.reduce(deps, %{}, fn {source, parents}, acc ->
+            sourceBuffs = Enum.reduce(parents, %{}, fn parentId, acc ->
+                Map.put(acc, parentId, :queue.new()) 
+            end)
+            Map.put(acc, source, sourceBuffs)
+        end)
         {:ok, %{ aSignal | 
             hasChildren: length(aSignal.children)>0, 
             chckpts: Enum.reduce(aSignal.parents, %{}, &Map.put(&2, &1, 0)),
-            buffs: Enum.reduce(deps, %{}, fn {source, parents}, acc ->
-                sourceBuffs = Enum.reduce(parents, %{}, fn parentId, acc ->
-                    Map.put(acc, parentId, :queue.new()) 
-                end)
-                Map.put(acc, source, sourceBuffs)
+            buffs: buffs,
+            readyCnt: Enum.reduce(buffs, %{}, fn {source, _}, acc ->
+                Map.put(acc, source, 0)
             end)
         } }
     end
 
     def reevaluate(aSignal, source) do
+        aSignal = update_in(aSignal.readyCnt[source], &(&1+1))
         {aSignal, message} = Enum.reduce(aSignal.buffs[source], {aSignal, nil}, fn {parentId, queue}, {aSignal, _} ->
             {{:value, message}, queue} = :queue.out(queue)
             {
                 %{ aSignal |
                     buffs: %{ aSignal.buffs | source => Map.put(aSignal.buffs[source], parentId, queue) },
-                    args: Map.put(aSignal.args, parentId, message.value)
+                    args: Map.put(aSignal.args, parentId, message.value),
+                    readyCnt: Map.update!(aSignal.readyCnt, source, fn val ->
+                        if :queue.is_empty(queue) do
+                            val-1
+                        else
+                            val
+                        end
+                    end)
                 },
                 message
             }
@@ -88,15 +97,14 @@ defmodule Signal do
     end
 
     def handle_cast({:propagate, %Message{sender: sender, source: source}=msg}, aSignal) do 
+        wasEmpty = :queue.is_empty(aSignal.buffs[source][sender])
         aSignal = update_in(aSignal.buffs[source][sender], &(:queue.in(msg, &1)))
-        ready = Enum.reduce_while(aSignal.buffs[source], true, fn {_, queue}, acc ->
-            chckpting = Map.get(aSignal.chckpts, sender)>0
-            empty = :queue.is_empty(queue)
-            ready = !(empty || chckpting)
-            { ready && :cont || :halt, acc && ready }
-        end)
-        if ready do
-            { :noreply, reevaluate(aSignal, source) }
+        if wasEmpty do
+            if (Map.size(aSignal.buffs[source])==aSignal.readyCnt[source]+1) && Map.get(aSignal.chckpts, sender)==0 do
+                { :noreply, reevaluate(aSignal, source) }
+            else
+                { :noreply, update_in(aSignal.readyCnt[source], &(&1+1)) }
+            end
         else
             { :noreply, aSignal }
         end
