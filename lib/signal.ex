@@ -14,7 +14,7 @@ defmodule Signal do
     end
 
     def _unblock(aSignal, source, chckptId) do
-        if aSignal.readyCnt==Map.size(aSignal.buffs[source]) 
+        if aSignal.readyCnt[source]==Map.size(aSignal.buffs[source]) 
             && :queue.head(Enum.at(aSignal.buffs[source], 0) |> elem(1)).chckptId==chckptId do
             aSignal = reevaluate(aSignal, source)
             _unblock(aSignal, source, chckptId)
