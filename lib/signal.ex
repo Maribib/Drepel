@@ -65,7 +65,6 @@ defmodule Signal do
     end
 
     def reevaluate(aSignal, source) do
-        aSignal = update_in(aSignal.readyCnt[source], &(&1+1))
         {aSignal, message} = Enum.reduce(aSignal.buffs[source], {aSignal, nil}, fn {parentId, queue}, {aSignal, _} ->
             {{:value, message}, queue} = :queue.out(queue)
             {
@@ -100,10 +99,11 @@ defmodule Signal do
         wasEmpty = :queue.is_empty(aSignal.buffs[source][sender])
         aSignal = update_in(aSignal.buffs[source][sender], &(:queue.in(msg, &1)))
         if wasEmpty do
-            if (Map.size(aSignal.buffs[source])==aSignal.readyCnt[source]+1) && Map.get(aSignal.chckpts, sender)==0 do
+            aSignal = update_in(aSignal.readyCnt[source], &(&1+1))
+            if (Map.size(aSignal.buffs[source])==aSignal.readyCnt[source]) && Map.get(aSignal.chckpts, sender)==0 do
                 { :noreply, reevaluate(aSignal, source) }
             else
-                { :noreply, update_in(aSignal.readyCnt[source], &(&1+1)) }
+                { :noreply, aSignal }
             end
         else
             { :noreply, aSignal }
