@@ -16,8 +16,8 @@ defmodule Store do
     end
 
     def start(clustNodes) do
-    	:mnesia.create_schema(clustNodes)
     	Utils.multi_call(clustNodes, __MODULE__, :start)
+    	:mnesia.change_config(:extra_db_nodes, clustNodes)
     end
 
     def createTables(clustNodes, tableInfos) do
