@@ -1,9 +1,19 @@
 require Logger
 
 defmodule ClusterSupervisor do 
-	defstruct [clustNodes: [], stopMessages: [], nodesDown: [] ]
-
 	use GenServer
+
+	def _stop do
+		# stop balancer
+		Balancer.stop()
+		# stop checkpointing
+		Checkpoint.stop()
+		# stop sampling
+		Sampler.stop()
+		# stop nodes (sources and signals)
+		supervisors = [Source.Supervisor, Signal.Supervisor]
+		Enum.map(supervisors, &Utils.stopChildren(&1))
+	end
 
  	# Client API
 
@@ -19,58 +29,37 @@ defmodule ClusterSupervisor do
 		GenServer.call({__MODULE__, aNode}, {:monitor, clustNodes})
     end
 
-    def stop(aNode, nodeDown) do
-    	GenServer.cast({__MODULE__ ,aNode}, {:stop, node(), nodeDown})
-    end
-
     # Server API
 
     def init(:ok) do
-        { :ok, %__MODULE__{} }
+        { :ok, [] }
     end
 
-	def handle_call({:monitor, clustNodes}, _from, state) do
-		Enum.map(state.clustNodes -- clustNodes, &Node.monitor(&1, false))
-		Enum.map(clustNodes -- state.clustNodes, &Node.monitor(&1, true))
-		{ :reply, :ok, %{ state | clustNodes: clustNodes } }
+	def handle_call({:monitor, newClustNodes}, _from, clustNodes) do
+		Enum.map(clustNodes -- newClustNodes, &Node.monitor(&1, false))
+		Enum.map(newClustNodes -- clustNodes, &Node.monitor(&1, true))
+		{ :reply, :ok, newClustNodes }
 	end
 
-	def handle_cast({:stop, aNode, nodeDown}, state) do
-		stopMessages = state.stopMessages ++ [aNode]
-		nodesDown = Enum.uniq(state.nodesDown ++ [nodeDown])
-		if length(state.clustNodes--stopMessages)==0 do
-			chckptId = Checkpoint.lastCompleted()
-			Drepel.Env.restore(chckptId, state.clustNodes, nodesDown)
-			{ :noreply, %{ state | 
-				stopMessages: [], 
-				nodesDown: []
-			} }
-		else
-			{ :noreply, %{ state | 
-				stopMessages: stopMessages, 
-				nodesDown: nodesDown
-			} }
+	def handle_call({:stop, newClustNodes}, _from, _clustNodes) do
+		_stop()
+		{:reply, :ok, newClustNodes}
+	end
+
+	def handle_info({:nodedown, nodeName}, clustNodes) do
+		newClustNodes = clustNodes -- [nodeName]
+		if node()==Enum.at(newClustNodes, 0) do
+			# stop locally
+			_stop()
+			# stop remote
+			{_, bad_nodes} = GenServer.multi_call(newClustNodes -- [node()], __MODULE__, {:stop, newClustNodes})
+			if length(bad_nodes)<1 do # no other failure do
+			 	Checkpoint.lastCompleted()
+				|> Drepel.Env.restore(newClustNodes)
+			end
 		end
-	end
-
-	def handle_info({:nodedown, nodeName}, state) do
-		Logger.error("node down: #{nodeName}")
-		# stop balancer
-		Balancer.stop()
-		# stop checkpointing
-		Checkpoint.stop()
-		# stop sampling
-		Sampler.stop()
-		# stop nodes (sources and signals)
-		supervisors = [Source.Supervisor, Signal.Supervisor]
-		Enum.map(supervisors, &Utils.stopChildren(&1))
-		# Elect and alert new leader with stop message
-		clustNodes = state.clustNodes -- [nodeName]
-		leader = Enum.at(clustNodes, 0)
-		stop(leader, nodeName)
-		{:noreply, %{ state | 
-			clustNodes: clustNodes
-		} }
+		Enum.map(clustNodes -- newClustNodes, &Node.monitor(&1, false))
+		{:noreply, newClustNodes }
 	end
 
 end

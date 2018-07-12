@@ -175,8 +175,8 @@ defmodule Drepel.Env do
         Utils.multi_call(nodes, __MODULE__, {:replicate, env})
     end
 
-    def restore(chckptId, clustNodes, nodesDown) do
-        GenServer.call(__MODULE__, {:restore, chckptId, clustNodes, nodesDown})
+    def restore(chckptId, clustNodes) do
+        GenServer.call(__MODULE__, {:restore, chckptId, clustNodes})
     end
 
     def test do
@@ -434,7 +434,8 @@ defmodule Drepel.Env do
         {:reply, :ok, %{ env | timer: nil, running: false } }
     end
 
-    def handle_call({:restore, chckptId, clustNodes, nodesDown}, _from, env) do
+    def handle_call({:restore, chckptId, clustNodes}, _from, env) do
+        nodesDown = env.clustNodes -- clustNodes
         newRouting = computeNewRouting(env, nodesDown)
         env = %{ env | clustNodes: clustNodes, routing: newRouting }
         tableInfos = computeTableInfos(env)
