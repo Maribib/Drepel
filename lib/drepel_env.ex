@@ -40,10 +40,9 @@ defmodule Drepel.Env do
     end
 
     def computeNewRouting(env, nodesDown) do
-        oldClustNodes = Map.values(env.routing) |> Enum.uniq()
         Enum.reduce(env.routing, %{}, fn {id, node}, acc ->
             if Enum.member?(nodesDown, node) do
-                repNodes = computeRepNodes(env, oldClustNodes, node)
+                repNodes = computeRepNodes(env, env.clustNodes, node)
                 newNode = Enum.at(repNodes -- nodesDown, 0)
                 Map.put(acc, id, newNode)
             else
@@ -76,7 +75,7 @@ defmodule Drepel.Env do
         env.clustNodes -- [node()]
         |> Drepel.Env.replicate(env)
         # reset stats
-        resetStats(env.routing)
+        #resetStats(env.routing)
         # reset checkpointing
         sourcesRouting = Map.take(env.routing, env.sources)
         Checkpoint.reset(leader, listSinks(env), env.clustNodes, sourcesRouting, env.chckptInterval)
@@ -85,11 +84,11 @@ defmodule Drepel.Env do
         # restart all sources
         restartSources(env, chckptId)
         # restart stats sampling
-        Sampler.start(env.clustNodes)
+        #Sampler.start(env.clustNodes)
         # restart checkpointing
         Checkpoint.start()
         # reset balancer
-        Balancer.reset(env.clustNodes, env.routing, env.balancingInterval)
+        #Balancer.reset(env.clustNodes, env.routing, env.balancingInterval)
         Logger.info "system restarted"
     end
 
@@ -113,6 +112,10 @@ defmodule Drepel.Env do
 
     def setReplicationFactor(factor) do
         GenServer.call(__MODULE__, {:setReplicationFactor, factor})
+    end
+
+    def setClusterNodes(nodes) do
+        GenServer.call(__MODULE__, {:setClusterNodes, nodes})
     end
 
     def createBSource(refreshRate, fct, default, opts) do
@@ -227,9 +230,9 @@ defmodule Drepel.Env do
     end
 
     def handle_call({:discover, clustNode}, _from, env) do
-        leader = Enum.at(env.clustNodes, 0)
+        #leader = Enum.at(env.clustNodes, 0)
         Store.discover(clustNode)
-        Balancer.join(leader, clustNode)
+        #Balancer.join(leader, clustNode)
         ClusterSupervisor.monitor(env.clustNodes ++ [clustNode])
         env.clustNodes -- [node()]
         |> addClustNode(clustNode)
@@ -238,8 +241,8 @@ defmodule Drepel.Env do
     end
 
     def handle_call({:join, nodes}, _from, env) do
-        Sampler.reset(node(), [])
-        Sampler.start()
+        #Sampler.reset(node(), [])
+        #Sampler.start()
         Store.start()
         res = Enum.reduce_while(nodes, nil, fn node, _ ->
             newEnv = Drepel.Env.discover(node)
@@ -270,6 +273,11 @@ defmodule Drepel.Env do
 
     def handle_call({:setReplicationFactor, factor}, _from, env) do
         { :reply, :ok, %{ env | repFactor: factor} }
+    end
+
+    def handle_call({:setClusterNodes, nodes}, _from, env) do
+        # TODO ping nodes
+        { :reply, :ok, %{ env | clustNodes: nodes } }
     end
 
     def handle_call({:replicate, env}, _from, _env) do
@@ -375,7 +383,7 @@ defmodule Drepel.Env do
     def handle_call({:startNodes, duration}, _from, env) do
         Logger.info "system started"
         env = %{ env | 
-            clustNodes: Map.values(env.routing) |> Enum.uniq(),
+            clustNodes: env.clustNodes ++ Map.values(env.routing) |> Enum.uniq(),
             running: true
         }
         leader = Enum.at(env.clustNodes, 0)
@@ -385,7 +393,7 @@ defmodule Drepel.Env do
         env.clustNodes -- [node()]
         |> Drepel.Env.replicate(env)
         # reset stats
-        resetStats(env.routing)
+        #resetStats(env.routing)
         # reset stores
         Store.reset(env.clustNodes)
         # reset checkpointing
@@ -407,11 +415,11 @@ defmodule Drepel.Env do
             { Map.get(env.routing, id), {id, name} }
         end))
         # start sampler
-        Sampler.start(env.clustNodes)
+        #Sampler.start(env.clustNodes)
         # start checkpointing
         Checkpoint.start(leader)
         # reset balancer
-        Balancer.reset(env.clustNodes, env.routing, env.balancingInterval)
+        #Balancer.reset(env.clustNodes, env.routing, env.balancingInterval)
         timer = case duration do
             :inf -> nil
             _ -> Process.send_after(self(), :stopNodes, duration)
@@ -422,11 +430,11 @@ defmodule Drepel.Env do
     def handle_call(:stopNodes, _from, env) do
         leader = Enum.at(env.clustNodes, 0)
         # stop balancer
-        Balancer.stop(leader)
+        ##Balancer.stop(leader)
         # stop checkpoint
         Checkpoint.stop(leader)
         # stop stats
-        Sampler.stop(env.clustNodes)
+        #Sampler.stop(env.clustNodes)
         # stop nodes
         stopAll(env)
         Utils.cancelTimer(env.timer)

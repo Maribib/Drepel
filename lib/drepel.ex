@@ -36,6 +36,10 @@ defmodule Drepel do
         end
     end
 
+    def setClusterNodes(nodes) when is_list(nodes) do
+        Drepel.Env.setClusterNodes(nodes)
+    end
+
     def bSource(rate, default, fct, opts \\ []) when is_integer(rate) do
         Drepel.Env.createBSource(rate, fct, default, opts)
     end
