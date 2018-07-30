@@ -8,13 +8,13 @@ defmodule Main.Supervisor do
     def init(:ok) do
         children = [
             {Drepel.Env, name: Drepel.Env},
-            {Sampler, name: Sampler}, 
+            #{Sampler, name: Sampler}, 
             {Signal.Supervisor, name: Signal.Supervisor}, 
             {Source.Supervisor, name: Source.Supervisor},
             {ClusterSupervisor, name: ClusterSupervisor},
             {Store, name: Store},
             {Checkpoint, name: Checkpoint},
-            {Balancer, name: Balancer},
+            #{Balancer, name: Balancer},
             {TCPServer, name: TCPServer},
             {MyStuff, name: MyStuff}
         ]

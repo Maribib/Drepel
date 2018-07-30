@@ -5,11 +5,11 @@ defmodule ClusterSupervisor do
 
 	def _stop do
 		# stop balancer
-		Balancer.stop()
+		#Balancer.stop()
 		# stop checkpointing
 		Checkpoint.stop()
 		# stop sampling
-		Sampler.stop()
+		#Sampler.stop()
 		# stop nodes (sources and signals)
 		supervisors = [Source.Supervisor, Signal.Supervisor]
 		Enum.map(supervisors, &Utils.stopChildren(&1))
@@ -48,6 +48,7 @@ defmodule ClusterSupervisor do
 
 	def handle_info({:nodedown, nodeName}, clustNodes) do
 		newClustNodes = clustNodes -- [nodeName]
+		Enum.map(clustNodes -- newClustNodes, &Node.monitor(&1, false))
 		if node()==Enum.at(newClustNodes, 0) do
 			# stop locally
 			_stop()
@@ -58,7 +59,6 @@ defmodule ClusterSupervisor do
 				|> Drepel.Env.restore(newClustNodes)
 			end
 		end
-		Enum.map(clustNodes -- newClustNodes, &Node.monitor(&1, false))
 		{:noreply, newClustNodes }
 	end
 
