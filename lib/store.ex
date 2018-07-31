@@ -29,6 +29,7 @@ defmodule Store do
     end
 
     def reset(nodes) do
+    	Utils.multi_call(nodes, __MODULE__, :stop)
     	:mnesia.delete_schema(nodes)
     end
 
@@ -116,6 +117,11 @@ defmodule Store do
     def handle_call(:start, _from, state) do
     	:mnesia.start()
     	{ :reply, :ok, state }
+    end
+
+    def handle_call(:stop, _from, _state) do
+    	:mnesia.stop
+    	{ :reply, :ok, %__MODULE__{} }
     end
 
     def handle_call({:createTables, tableInfos}, _from, state) do
